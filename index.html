@@ -183,6 +183,8 @@ function GravityPoint(x, y, radius, targets) {
         gravities: targets.gravities || []
     };
     this._speed = new Vector();
+    // Per-hole phase keeps the visual accretion disks from moving in sync.
+    this._visualPhase = Math.random() * Math.PI * 2;
 }
 
 GravityPoint.RADIUS_LIMIT = 65;
@@ -313,26 +315,91 @@ GravityPoint.prototype = (function(o) {
     },
 
     _draw: function(ctx) {
-        var grd, r;
+        var grd, t, pulse, r, rotation, i, angle, diskRadius, glowRadius;
+
+        if (this.currentRadius <= 0) return;
+
+        t = (window.performance && performance.now ? performance.now() : Date.now()) * 0.001;
+        t += this._visualPhase;
+        pulse = 0.94 + Math.sin(t * 2.2) * 0.06;
+        r = Math.max(2, this.currentRadius);
+        diskRadius = Math.max(r * 1.08, this.radius * 1.2);
+        glowRadius = diskRadius * 4.2;
+        rotation = t * (0.75 + Math.min(1.5, Math.abs(this.gravity)) * 0.18);
 
         ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
 
-        grd = ctx.createRadialGradient(this.x, this.y, this.radius, this.x, this.y, this.radius * 5);
-        grd.addColorStop(0, 'rgba(0, 0, 0, 0.1)');
+        // Broad gravitational glow, built from gradients rather than shadowBlur.
+        grd = ctx.createRadialGradient(this.x, this.y, r * 0.35, this.x, this.y, glowRadius);
+        grd.addColorStop(0, 'rgba(15, 8, 28, 0.92)');
+        grd.addColorStop(0.18, 'rgba(75, 35, 180, 0.22)');
+        grd.addColorStop(0.42, 'rgba(0, 190, 255, 0.11)');
+        grd.addColorStop(0.68, 'rgba(255, 100, 25, 0.055)');
         grd.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius * 5, 0, Math.PI * 2, false);
         ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, glowRadius, 0, Math.PI * 2);
         ctx.fill();
 
-        r = Math.random() * this.currentRadius * 0.7 + this.currentRadius * 0.3;
-        grd = ctx.createRadialGradient(this.x, this.y, r, this.x, this.y, this.currentRadius);
-        grd.addColorStop(0, 'rgba(0, 0, 0, 1)');
-        grd.addColorStop(1, Math.random() < 0.2 ? 'rgba(255, 196, 0, 0.15)' : 'rgba(103, 181, 191, 0.75)');
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.currentRadius, 0, Math.PI * 2, false);
+        // Flattened, rotating accretion disk with hot inner and cool outer light.
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(rotation);
+        ctx.scale(1, 0.32);
+
+        grd = ctx.createRadialGradient(0, 0, r * 0.72, 0, 0, diskRadius * 1.9);
+        grd.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        grd.addColorStop(0.38, 'rgba(255, 110, 25, 0.04)');
+        grd.addColorStop(0.48, 'rgba(255, 165, 60, 0.86)');
+        grd.addColorStop(0.56, 'rgba(255, 235, 190, 0.96)');
+        grd.addColorStop(0.63, 'rgba(50, 210, 255, 0.72)');
+        grd.addColorStop(0.76, 'rgba(100, 70, 255, 0.2)');
+        grd.addColorStop(1, 'rgba(0, 0, 0, 0)');
         ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.arc(0, 0, diskRadius * 1.9, 0, Math.PI * 2);
         ctx.fill();
+
+        // Uneven orbital arcs create a turbulent, swirling appearance.
+        for (i = 0; i < 3; i++) {
+            angle = i * 2.094 + rotation * (i % 2 ? -0.72 : 0.58);
+            ctx.beginPath();
+            ctx.ellipse(0, 0, diskRadius * (1.05 + i * 0.2), diskRadius * (1.05 + i * 0.2), angle * 0.08, angle, angle + 1.45 + (i % 2) * 0.7);
+            ctx.lineWidth = Math.max(1, r * (0.045 - i * 0.008));
+            ctx.strokeStyle = i === 0 ? 'rgba(255, 235, 200, 0.95)' :
+                (i === 1 ? 'rgba(40, 205, 255, 0.78)' : 'rgba(160, 90, 255, 0.62)');
+            ctx.stroke();
+        }
+
+        // A few hot spots orbit around the disk to suggest fast-moving matter.
+        for (i = 0; i < 4; i++) {
+            angle = rotation * (i % 2 ? -1.25 : 1) + i * Math.PI * 0.5 + this._visualPhase;
+            var sparkRadius = diskRadius * (1.12 + 0.08 * Math.sin(t * 3 + i));
+            ctx.beginPath();
+            ctx.arc(Math.cos(angle) * sparkRadius, Math.sin(angle) * sparkRadius, Math.max(1.2, r * 0.075), 0, Math.PI * 2);
+            ctx.fillStyle = i % 2 ? 'rgba(80, 220, 255, 0.95)' : 'rgba(255, 220, 160, 1)';
+            ctx.fill();
+        }
+        ctx.restore();
+
+        // Dark event-horizon core with a thin, bright rim.
+        grd = ctx.createRadialGradient(this.x - r * 0.18, this.y - r * 0.22, r * 0.05, this.x, this.y, r * 1.08);
+        grd.addColorStop(0, 'rgba(1, 1, 8, 1)');
+        grd.addColorStop(0.72, 'rgba(0, 0, 5, 1)');
+        grd.addColorStop(0.91, 'rgba(5, 4, 18, 1)');
+        grd.addColorStop(1, 'rgba(20, 190, 255, 0.82)');
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, r * 1.04 * pulse, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, r * 1.045 * pulse, rotation * 0.4, rotation * 0.4 + Math.PI * 1.62);
+        ctx.lineWidth = Math.max(1, r * 0.035);
+        ctx.strokeStyle = 'rgba(255, 200, 125, 0.88)';
+        ctx.stroke();
+
         ctx.restore();
     }
 });
