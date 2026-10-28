@@ -231,7 +231,7 @@ GravityPoint.prototype = (function(o) {
         this._collapsing = true;
     },
 
-    render: function(ctx) {
+    render: function() {
         if (this.destroyed) return;
 
         var particles = this._targets.particles,
@@ -657,7 +657,7 @@ Particle.prototype = (function(o) {
         for (i = 0, len = gravities.length; i < len; i++) {
             g = gravities[i];
             if (g.dragging) g.drag(mouse);
-            g.render(context);
+            g.render();
             if (g.destroyed) {
                 gravities.splice(i, 1);
                 len--;
