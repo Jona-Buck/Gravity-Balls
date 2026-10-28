@@ -2,6 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Gravity</title>
 
 <style>
@@ -477,19 +478,45 @@ Particle.prototype = (function(o) {
 
     addParticle(2000);
 
-    // Pointer Events support mouse, touchscreen and stylus.
-    canvas.addEventListener('pointermove', mouseMove, false);
+    // Mouse/stylus: Pointer Events. Touch: explicit Touch Events as well,
+    // while ignoring touch Pointer Events so a single tap is never handled twice.
+    canvas.addEventListener('pointermove', function(e) {
+        if (e.pointerType !== 'touch') mouseMove(e);
+    }, false);
     canvas.addEventListener('pointerdown', function(e) {
+        if (e.pointerType === 'touch') return;
         if (canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
         mouseDown(e);
     }, false);
     canvas.addEventListener('pointerup', function(e) {
+        if (e.pointerType === 'touch') return;
         mouseUp(e);
         if (canvas.hasPointerCapture && canvas.hasPointerCapture(e.pointerId)) {
             canvas.releasePointerCapture(e.pointerId);
         }
     }, false);
-    canvas.addEventListener('pointercancel', mouseUp, false);
+    canvas.addEventListener('pointercancel', function(e) {
+        if (e.pointerType !== 'touch') mouseUp(e);
+    }, false);
+
+    // Explicit touch handling for mobile browsers. preventDefault stops the
+    // page from scrolling/zooming while the user creates or drags a ball.
+    canvas.addEventListener('touchstart', function(e) {
+        e.preventDefault();
+        if (e.changedTouches.length) mouseDown(e.changedTouches[0]);
+    }, { passive: false });
+    canvas.addEventListener('touchmove', function(e) {
+        e.preventDefault();
+        if (e.touches.length) mouseMove(e.touches[0]);
+    }, { passive: false });
+    canvas.addEventListener('touchend', function(e) {
+        e.preventDefault();
+        mouseUp(e);
+    }, { passive: false });
+    canvas.addEventListener('touchcancel', function(e) {
+        mouseUp(e);
+    }, false);
+
     canvas.addEventListener('dblclick', doubleClick, false);
 
     var loop = function() {
