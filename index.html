@@ -232,10 +232,21 @@ GravityPoint.prototype = (function(o) {
         if (this.destroyed) return;
 
         var particles = this._targets.particles,
-            i, len;
+            i, len, particle, dx, dy, distanceSq, strength;
 
+        // Apply gravity with scalar math instead of allocating several Vector
+        // objects for every particle on every frame.
         for (i = 0, len = particles.length; i < len; i++) {
-            particles[i].addSpeed(Vector.sub(this, particles[i]).normalize().scale(this.gravity));
+            particle = particles[i];
+            dx = this.x - particle.x;
+            dy = this.y - particle.y;
+            distanceSq = dx * dx + dy * dy;
+
+            if (distanceSq > 0) {
+                strength = this.gravity / Math.sqrt(distanceSq);
+                particle._speed.x += dx * strength;
+                particle._speed.y += dy * strength;
+            }
         }
 
         this._easeRadius = (this._easeRadius + (this.radius - this.currentRadius) * 0.07) * 0.95;
@@ -250,7 +261,7 @@ GravityPoint.prototype = (function(o) {
         }
 
         var gravities = this._targets.gravities,
-            g, absorp,
+            g, dx, dy, distanceSq, contactDistance, strength, absorptionScale,
             area = this.radius * this.radius * Math.PI, garea;
 
         for (i = 0, len = gravities.length; i < len; i++) {
@@ -258,28 +269,42 @@ GravityPoint.prototype = (function(o) {
 
             if (g === this || g.destroyed) continue;
 
+            dx = this.x - g.x;
+            dy = this.y - g.y;
+            distanceSq = dx * dx + dy * dy;
+            contactDistance = (this.currentRadius + g.radius) * 0.85;
+
+            // Compare squared distances to avoid an unnecessary square root.
             if (
                 (this.currentRadius >= g.radius || this.dragging) &&
-                this.distanceTo(g) < (this.currentRadius + g.radius) * 0.85
+                distanceSq < contactDistance * contactDistance
             ) {
                 g.destroyed = true;
                 this.gravity += g.gravity;
 
-                absorp = Vector.sub(g, this).scale(g.radius / this.radius * 0.5);
-                this.addSpeed(absorp);
+                absorptionScale = g.radius / this.radius * 0.5;
+                this._speed.x -= dx * absorptionScale;
+                this._speed.y -= dy * absorptionScale;
 
                 garea = g.radius * g.radius * Math.PI;
                 this.currentRadius = Math.sqrt((area + garea * 3) / Math.PI);
                 this.radius = Math.sqrt((area + garea) / Math.PI);
             }
 
-            g.addSpeed(Vector.sub(this, g).normalize().scale(this.gravity));
+            // Reuse the distance already calculated and avoid temporary Vectors.
+            if (distanceSq > 0) {
+                strength = this.gravity / Math.sqrt(distanceSq);
+                g._speed.x += dx * strength;
+                g._speed.y += dy * strength;
+            }
         }
 
         if (GravityPoint.interferenceToPoint && !this.dragging)
             this.add(this._speed);
 
-        this._speed = new Vector();
+        // Reuse the speed Vector instead of allocating a new one every frame.
+        this._speed.x = 0;
+        this._speed.y = 0;
 
         if (this.currentRadius > GravityPoint.RADIUS_LIMIT) this.collapse();
 
@@ -509,16 +534,9 @@ Particle.prototype = (function(o) {
             bufferCtx.lineTo(p._latest.x, p._latest.y);
         }
 
+        // Rounded line caps already render the particle endpoints as dots,
+        // so a second pass drawing circles over the same points is redundant.
         bufferCtx.stroke();
-        bufferCtx.beginPath();
-
-        for (i = 0; i < len; i++) {
-            p = particles[i];
-            bufferCtx.moveTo(p.x, p.y);
-            bufferCtx.arc(p.x, p.y, p.radius, 0, Math.PI * 2, false);
-        }
-
-        bufferCtx.fill();
         bufferCtx.restore();
 
         context.drawImage(bufferCvs, 0, 0);
