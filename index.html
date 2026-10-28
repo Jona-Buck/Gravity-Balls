@@ -315,91 +315,150 @@ GravityPoint.prototype = (function(o) {
     },
 
     _draw: function(ctx) {
-        var grd, t, pulse, r, rotation, i, angle, diskRadius, glowRadius;
+        var now, t, r, coreRadius, diskRadius, haloRadius, rotation,
+            grd, i, orbitRadius, startAngle, sweep, lineWidth, pulse;
 
         if (this.currentRadius <= 0) return;
 
-        t = (window.performance && performance.now ? performance.now() : Date.now()) * 0.001;
-        t += this._visualPhase;
-        pulse = 0.94 + Math.sin(t * 2.2) * 0.06;
-        r = Math.max(2, this.currentRadius);
-        diskRadius = Math.max(r * 1.08, this.radius * 1.2);
-        glowRadius = diskRadius * 4.2;
-        rotation = t * (0.75 + Math.min(1.5, Math.abs(this.gravity)) * 0.18);
+        now = window.performance && performance.now ? performance.now() : Date.now();
+        t = now * 0.001;
+        r = Math.max(1.5, this.currentRadius);
+        coreRadius = r * 0.86;
+        diskRadius = Math.max(r * 2.15, this.radius * 1.35);
+        haloRadius = diskRadius * 1.35;
+        rotation = t * (0.72 + Math.min(1.1, Math.abs(this.gravity) * 0.28)) + this._visualPhase;
+        pulse = 0.988 + Math.sin(t * 1.55 + this._visualPhase) * 0.012;
 
+        ctx.save();
+
+        // Keep the atmosphere close to the existing deep teal canvas palette.
+        // It should tint nearby space, not turn the entire scene into a neon cloud.
+        grd = ctx.createRadialGradient(
+            this.x, this.y, coreRadius * 0.7,
+            this.x, this.y, haloRadius
+        );
+        grd.addColorStop(0, 'rgba(0, 8, 10, 0.12)');
+        grd.addColorStop(0.28, 'rgba(10, 70, 75, 0.20)');
+        grd.addColorStop(0.52, 'rgba(15, 132, 138, 0.105)');
+        grd.addColorStop(0.76, 'rgba(191, 120, 70, 0.035)');
+        grd.addColorStop(1, 'rgba(11, 51, 56, 0)');
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, haloRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // BACK OF THE DISK
+        // A thin, flattened ring with restrained teal and hot-gas highlights.
+        // The rotating arcs move at slightly different rates to suggest turbulent flow.
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-
-        // Broad gravitational glow, built from gradients rather than shadowBlur.
-        grd = ctx.createRadialGradient(this.x, this.y, r * 0.35, this.x, this.y, glowRadius);
-        grd.addColorStop(0, 'rgba(15, 8, 28, 0.92)');
-        grd.addColorStop(0.18, 'rgba(75, 35, 180, 0.22)');
-        grd.addColorStop(0.42, 'rgba(0, 190, 255, 0.11)');
-        grd.addColorStop(0.68, 'rgba(255, 100, 25, 0.055)');
-        grd.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = grd;
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, glowRadius, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Flattened, rotating accretion disk with hot inner and cool outer light.
-        ctx.save();
         ctx.translate(this.x, this.y);
         ctx.rotate(rotation);
-        ctx.scale(1, 0.32);
+        ctx.scale(1, 0.31);
 
-        grd = ctx.createRadialGradient(0, 0, r * 0.72, 0, 0, diskRadius * 1.9);
+        grd = ctx.createRadialGradient(0, 0, coreRadius * 0.98, 0, 0, diskRadius);
         grd.addColorStop(0, 'rgba(0, 0, 0, 0)');
-        grd.addColorStop(0.38, 'rgba(255, 110, 25, 0.04)');
-        grd.addColorStop(0.48, 'rgba(255, 165, 60, 0.86)');
-        grd.addColorStop(0.56, 'rgba(255, 235, 190, 0.96)');
-        grd.addColorStop(0.63, 'rgba(50, 210, 255, 0.72)');
-        grd.addColorStop(0.76, 'rgba(100, 70, 255, 0.2)');
-        grd.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        grd.addColorStop(0.26, 'rgba(0, 0, 0, 0)');
+        grd.addColorStop(0.39, 'rgba(31, 151, 155, 0.10)');
+        grd.addColorStop(0.48, 'rgba(74, 210, 210, 0.34)');
+        grd.addColorStop(0.53, 'rgba(255, 203, 143, 0.66)');
+        grd.addColorStop(0.58, 'rgba(237, 248, 225, 0.82)');
+        grd.addColorStop(0.64, 'rgba(88, 218, 218, 0.48)');
+        grd.addColorStop(0.78, 'rgba(24, 139, 147, 0.13)');
+        grd.addColorStop(1, 'rgba(11, 51, 56, 0)');
         ctx.fillStyle = grd;
         ctx.beginPath();
-        ctx.arc(0, 0, diskRadius * 1.9, 0, Math.PI * 2);
+        ctx.arc(0, 0, diskRadius, 0, Math.PI * 2);
         ctx.fill();
 
-        // Uneven orbital arcs create a turbulent, swirling appearance.
-        for (i = 0; i < 3; i++) {
-            angle = i * 2.094 + rotation * (i % 2 ? -0.72 : 0.58);
+        // Fine streamlines instead of decorative dots or disconnected orbit rings.
+        for (i = 0; i < 4; i++) {
+            orbitRadius = r * (1.18 + i * 0.245);
+            startAngle = t * (i % 2 ? -0.82 : 0.57) + this._visualPhase * 0.7 + i * 1.91;
+            sweep = 0.78 + (i % 3) * 0.28;
+            lineWidth = Math.max(0.65, r * (0.041 - i * 0.006));
+
             ctx.beginPath();
-            ctx.ellipse(0, 0, diskRadius * (1.05 + i * 0.2), diskRadius * (1.05 + i * 0.2), angle * 0.08, angle, angle + 1.45 + (i % 2) * 0.7);
-            ctx.lineWidth = Math.max(1, r * (0.045 - i * 0.008));
-            ctx.strokeStyle = i === 0 ? 'rgba(255, 235, 200, 0.95)' :
-                (i === 1 ? 'rgba(40, 205, 255, 0.78)' : 'rgba(160, 90, 255, 0.62)');
+            ctx.ellipse(0, 0, orbitRadius, orbitRadius, 0, startAngle, startAngle + sweep);
+            ctx.lineWidth = lineWidth;
+            ctx.strokeStyle = i % 2
+                ? 'rgba(113, 229, 225, 0.50)'
+                : 'rgba(255, 194, 128, 0.46)';
             ctx.stroke();
         }
 
-        // A few hot spots orbit around the disk to suggest fast-moving matter.
-        for (i = 0; i < 4; i++) {
-            angle = rotation * (i % 2 ? -1.25 : 1) + i * Math.PI * 0.5 + this._visualPhase;
-            var sparkRadius = diskRadius * (1.12 + 0.08 * Math.sin(t * 3 + i));
-            ctx.beginPath();
-            ctx.arc(Math.cos(angle) * sparkRadius, Math.sin(angle) * sparkRadius, Math.max(1.2, r * 0.075), 0, Math.PI * 2);
-            ctx.fillStyle = i % 2 ? 'rgba(80, 220, 255, 0.95)' : 'rgba(255, 220, 160, 1)';
-            ctx.fill();
-        }
+        // A long, fine current gives the disk direction without overpowering the particles.
+        ctx.beginPath();
+        ctx.ellipse(0, 0, r * 1.62, r * 1.62, 0, rotation * -0.52 + 0.15, rotation * -0.52 + 1.95);
+        ctx.lineWidth = Math.max(0.7, r * 0.028);
+        ctx.strokeStyle = 'rgba(232, 248, 235, 0.65)';
+        ctx.stroke();
         ctx.restore();
 
-        // Dark event-horizon core with a thin, bright rim.
-        grd = ctx.createRadialGradient(this.x - r * 0.18, this.y - r * 0.22, r * 0.05, this.x, this.y, r * 1.08);
-        grd.addColorStop(0, 'rgba(1, 1, 8, 1)');
-        grd.addColorStop(0.72, 'rgba(0, 0, 5, 1)');
-        grd.addColorStop(0.91, 'rgba(5, 4, 18, 1)');
-        grd.addColorStop(1, 'rgba(20, 190, 255, 0.82)');
+        // EVENT HORIZON
+        // Use source-over here intentionally: the black centre must actually occlude
+        // the background and particles beneath it (additive blending cannot do that).
+        ctx.globalCompositeOperation = 'source-over';
+        grd = ctx.createRadialGradient(
+            this.x - coreRadius * 0.20, this.y - coreRadius * 0.24, coreRadius * 0.04,
+            this.x, this.y, coreRadius * 1.10
+        );
+        grd.addColorStop(0, 'rgba(0, 4, 6, 1)');
+        grd.addColorStop(0.72, 'rgba(0, 5, 7, 1)');
+        grd.addColorStop(0.91, 'rgba(0, 9, 12, 1)');
+        grd.addColorStop(1, 'rgba(3, 28, 31, 1)');
         ctx.fillStyle = grd;
         ctx.beginPath();
-        ctx.arc(this.x, this.y, r * 1.04 * pulse, 0, Math.PI * 2);
+        ctx.arc(this.x, this.y, coreRadius * pulse, 0, Math.PI * 2);
         ctx.fill();
 
+        // A quiet photon rim: icy teal overall, with a small warmer section that shifts
+        // as the hot material orbits. It stays sharp rather than relying on shadowBlur.
+        ctx.globalCompositeOperation = 'lighter';
         ctx.beginPath();
-        ctx.arc(this.x, this.y, r * 1.045 * pulse, rotation * 0.4, rotation * 0.4 + Math.PI * 1.62);
-        ctx.lineWidth = Math.max(1, r * 0.035);
-        ctx.strokeStyle = 'rgba(255, 200, 125, 0.88)';
+        ctx.arc(this.x, this.y, coreRadius * 1.015 * pulse, 0, Math.PI * 2);
+        ctx.lineWidth = Math.max(0.7, r * 0.032);
+        ctx.strokeStyle = 'rgba(106, 219, 218, 0.58)';
         ctx.stroke();
 
+        ctx.beginPath();
+        ctx.arc(
+            this.x, this.y, coreRadius * 1.045 * pulse,
+            rotation * 0.20 - 0.18,
+            rotation * 0.20 + 0.18 + Math.PI * 0.72
+        );
+        ctx.lineWidth = Math.max(0.8, r * 0.048);
+        ctx.strokeStyle = 'rgba(255, 194, 126, 0.72)';
+        ctx.stroke();
+
+        // FRONT OF THE DISK
+        // The lower stream passes in front of the horizon, hinting at gravitational
+        // lensing while keeping the centre unmistakably black.
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(rotation);
+        ctx.scale(1, 0.31);
+        ctx.globalCompositeOperation = 'lighter';
+
+        ctx.beginPath();
+        ctx.ellipse(0, 0, r * 1.10, r * 1.10, 0, 0.10, Math.PI - 0.10);
+        ctx.lineWidth = Math.max(1, r * 0.075);
+        ctx.strokeStyle = 'rgba(235, 159, 94, 0.58)';
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.ellipse(0, 0, r * 1.035, r * 1.035, 0, 0.18, Math.PI - 0.18);
+        ctx.lineWidth = Math.max(0.7, r * 0.027);
+        ctx.strokeStyle = 'rgba(190, 246, 238, 0.86)';
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.ellipse(0, 0, r * 1.19, r * 1.19, 0, 0.22, Math.PI * 0.82);
+        ctx.lineWidth = Math.max(0.6, r * 0.018);
+        ctx.strokeStyle = 'rgba(72, 207, 207, 0.62)';
+        ctx.stroke();
+
+        ctx.restore();
         ctx.restore();
     }
 });
