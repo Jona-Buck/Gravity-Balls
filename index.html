@@ -259,7 +259,6 @@ GravityPoint.prototype = (function(o) {
         if (this._collapsing) {
             this.radius *= 0.75;
             if (this.currentRadius < 1) this.destroyed = true;
-            this._draw(ctx);
             return;
         }
 
@@ -311,7 +310,6 @@ GravityPoint.prototype = (function(o) {
 
         if (this.currentRadius > GravityPoint.RADIUS_LIMIT) this.collapse();
 
-        this._draw(ctx);
     },
 
     _draw: function(ctx) {
@@ -424,8 +422,8 @@ GravityPoint.prototype = (function(o) {
         ctx.beginPath();
         ctx.arc(
             this.x, this.y, coreRadius * 1.045 * pulse,
-            rotation * 0.20 - 0.18,
-            rotation * 0.20 + 0.18 + Math.PI * 0.72
+            rotation * 0.20 - 0.10,
+            rotation * 0.20 + 0.10 + Math.PI * 0.22
         );
         ctx.lineWidth = Math.max(0.8, r * 0.048);
         ctx.strokeStyle = 'rgba(255, 194, 126, 0.72)';
@@ -693,6 +691,13 @@ Particle.prototype = (function(o) {
         bufferCtx.restore();
 
         context.drawImage(bufferCvs, 0, 0);
+
+        // Draw the black holes last so their event horizons truly mask the particle
+        // trails instead of letting white streaks show through the black centre.
+        // Their accretion disks still sit above the trails, like foreground light.
+        for (i = 0, len = gravities.length; i < len; i++) {
+            gravities[i]._draw(context);
+        }
 
         requestAnimationFrame(loop);
     };
