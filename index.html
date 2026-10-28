@@ -22,6 +22,7 @@ canvas {
     position: absolute;
     top: 0;
     left: 0;
+    touch-action: none;
 }
 
 .info {
@@ -387,12 +388,18 @@ Particle.prototype = (function(o) {
     }
 
     function mouseDown(e) {
+        // Pointer position must be refreshed on touch: mobile devices may not
+        // send a pointermove before the first tap.
+        mouse.set(e.clientX, e.clientY);
+
         for (var i = gravities.length - 1; i >= 0; i--) {
-            if (gravities[i].isMouseOver) {
+            if (!gravities[i].destroyed && gravities[i].hitTest(mouse)) {
+                gravities[i].isMouseOver = true;
                 gravities[i].startDrag(mouse);
                 return;
             }
         }
+
         gravities.push(new GravityPoint(e.clientX, e.clientY, G_POINT_RADIUS, {
             particles: particles,
             gravities: gravities
@@ -445,9 +452,19 @@ Particle.prototype = (function(o) {
 
     addParticle(2000);
 
-    canvas.addEventListener('mousemove', mouseMove, false);
-    canvas.addEventListener('mousedown', mouseDown, false);
-    canvas.addEventListener('mouseup', mouseUp, false);
+    // Pointer Events support mouse, touchscreen and stylus.
+    canvas.addEventListener('pointermove', mouseMove, false);
+    canvas.addEventListener('pointerdown', function(e) {
+        if (canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
+        mouseDown(e);
+    }, false);
+    canvas.addEventListener('pointerup', function(e) {
+        mouseUp(e);
+        if (canvas.hasPointerCapture && canvas.hasPointerCapture(e.pointerId)) {
+            canvas.releasePointerCapture(e.pointerId);
+        }
+    }, false);
+    canvas.addEventListener('pointercancel', mouseUp, false);
     canvas.addEventListener('dblclick', doubleClick, false);
 
     var loop = function() {
