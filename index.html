@@ -9,7 +9,7 @@ body {
     font-family: Helvetica sans-serif;
     padding: 0;
     margin: 0;
-    background-color: #000;
+    background-color: #222;
     overflow: hidden;
     -webkit-user-select: none;
        -moz-user-select: none;
@@ -23,17 +23,6 @@ canvas {
     top: 0;
     left: 0;
     touch-action: none;
-}
-
-#c {
-    z-index: 1;
-    background: transparent;
-}
-
-.lensing-background {
-    position: fixed;
-    z-index: 0;
-    pointer-events: none;
 }
 
 .info {
@@ -193,8 +182,6 @@ function GravityPoint(x, y, radius, targets) {
         gravities: targets.gravities || []
     };
     this._speed = new Vector();
-    // Each black hole begins at zero size and grows with the original ball radius animation.
-    this._lensMass = 0;
 }
 
 GravityPoint.RADIUS_LIMIT = 65;
@@ -300,7 +287,6 @@ GravityPoint.prototype = (function(o) {
     },
 
     _draw: function(ctx) {
-        if (window.__gravityLensingReady) return;
         var grd, r;
 
         ctx.save();
@@ -357,7 +343,8 @@ Particle.prototype = (function(o) {
 
 (function() {
 
-    var PARTICLE_RADIUS       = 1,
+    var BACKGROUND_COLOR      = 'rgba(11, 51, 56, 1)',
+        PARTICLE_RADIUS       = 1,
         G_POINT_RADIUS        = 10,
         G_POINT_RADIUS_LIMITS = 65;
 
@@ -367,13 +354,7 @@ Particle.prototype = (function(o) {
         mouse = new Vector(),
         gravities = [],
         particles = [],
-        backgroundCanvas, backgroundGl, backgroundProgram, backgroundTexture,
-        backgroundPositionLocation, backgroundCentersLocation,
-        backgroundMassesLocation, backgroundCountLocation,
-        backgroundResolutionLocation,
-        backgroundReady = false,
-        backgroundSide = 0,
-        blackHoleMass = 1500;
+        grad;
 
     function resize(e) {
         screenWidth  = canvas.width  = window.innerWidth;
@@ -382,203 +363,13 @@ Particle.prototype = (function(o) {
         bufferCvs.height = screenHeight;
         context   = canvas.getContext('2d');
         bufferCtx = bufferCvs.getContext('2d');
-        resizeBlackHoleCanvas();
-    }
 
-    function resizeBlackHoleCanvas() {
-        if (!backgroundCanvas) return;
+        var cx = canvas.width * 0.5,
+            cy = canvas.height * 0.5;
 
-        backgroundSide = Math.max(screenWidth, screenHeight);
-        backgroundCanvas.width = backgroundSide;
-        backgroundCanvas.height = backgroundSide;
-        backgroundCanvas.style.width = backgroundSide + 'px';
-        backgroundCanvas.style.height = backgroundSide + 'px';
-        backgroundCanvas.style.left = ((screenWidth - backgroundSide) / 2) + 'px';
-        backgroundCanvas.style.top = ((screenHeight - backgroundSide) / 2) + 'px';
-
-        if (backgroundGl) {
-            backgroundGl.viewport(0, 0, backgroundSide, backgroundSide);
-        }
-    }
-
-    function initBlackHoleRenderer() {
-        backgroundCanvas = document.createElement('canvas');
-        backgroundCanvas.className = 'lensing-background';
-        backgroundCanvas.setAttribute('aria-hidden', 'true');
-        backgroundCanvas.style.position = 'fixed';
-        document.body.insertBefore(backgroundCanvas, canvas);
-        resizeBlackHoleCanvas();
-
-        backgroundGl = backgroundCanvas.getContext('webgl', {
-            alpha: false,
-            antialias: false
-        }) || backgroundCanvas.getContext('experimental-webgl');
-
-        if (!backgroundGl) {
-            backgroundCanvas.style.display = 'none';
-            return;
-        }
-
-        var vertexSource = [
-            'attribute vec2 a_position;',
-            'varying vec2 v_uv;',
-            'void main() {',
-            '  v_uv = a_position * 0.5 + 0.5;',
-            '  gl_Position = vec4(a_position, 0.0, 1.0);',
-            '}'
-        ].join('\n');
-
-        // A multi-lens version of the reference effect: each gravity point
-        // distorts the same starfield texture using its own screen position.
-        var fragmentSource = [
-            'precision mediump float;',
-            '#define PI 3.14159265359',
-            'uniform sampler2D u_image;',
-            'uniform vec2 u_resolution;',
-            'uniform vec2 u_centers[16];',
-            'uniform float u_masses[16];',
-            'uniform int u_count;',
-            'void main() {',
-            '  vec2 st = vec2(gl_FragCoord.x, u_resolution.y - gl_FragCoord.y) / u_resolution;',
-            '  vec2 samplePoint = st;',
-            '  float combinedPull = 0.0;',
-            '  for (int i = 0; i < 16; i++) {',
-            '    if (i < u_count) {',
-            '      vec2 mt = vec2(u_centers[i].x, 1.0 - u_centers[i].y);',
-            '      float dx = samplePoint.x - mt.x;',
-            '      float dy = samplePoint.y - mt.y;',
-            '      float dist = sqrt(dx * dx + dy * dy);',
-            '      float pull = u_masses[i] / (dist * dist);',
-            '      float cs = cos(pull * PI)',
-            '      float sn = sin(pull * 0.0);',
-            '      float nx = (cs * (samplePoint.x - mt.x)) + (sn * (samplePoint.y - mt.y)) + mt.x;',
-            '      float ny = (cs * (samplePoint.y - mt.y)) - (sn * (samplePoint.x - mt.x)) + mt.y;',
-            '      samplePoint = vec2(nx, ny);',
-            '      combinedPull += pull;',
-            '    }',
-            '  }',
-            '  vec4 imgcolor = texture2D(u_image, samplePoint);',
-            '  vec3 color = vec3(',
-            '    imgcolor.r - (combinedPull * 0.25),',
-            '    imgcolor.g - (combinedPull * 0.25),',
-            '    imgcolor.b - (combinedPull * 0.25)',
-            '  );',
-            '  gl_FragColor = vec4(color, 1.0);',
-            '}'
-        ].join('\n');
-
-        function makeShader(type, source) {
-            var shader = backgroundGl.createShader(type);
-            backgroundGl.shaderSource(shader, source);
-            backgroundGl.compileShader(shader);
-            if (!backgroundGl.getShaderParameter(shader, backgroundGl.COMPILE_STATUS)) {
-                console.warn('Gravity Balls black-hole shader:', backgroundGl.getShaderInfoLog(shader));
-                backgroundGl.deleteShader(shader);
-                return null;
-            }
-            return shader;
-        }
-
-        var vertexShader = makeShader(backgroundGl.VERTEX_SHADER, vertexSource);
-        var fragmentShader = makeShader(backgroundGl.FRAGMENT_SHADER, fragmentSource);
-        if (!vertexShader || !fragmentShader) {
-            backgroundCanvas.style.display = 'none';
-            return;
-        }
-
-        backgroundProgram = backgroundGl.createProgram();
-        backgroundGl.attachShader(backgroundProgram, vertexShader);
-        backgroundGl.attachShader(backgroundProgram, fragmentShader);
-        backgroundGl.linkProgram(backgroundProgram);
-        if (!backgroundGl.getProgramParameter(backgroundProgram, backgroundGl.LINK_STATUS)) {
-            console.warn('Gravity Balls black-hole program:', backgroundGl.getProgramInfoLog(backgroundProgram));
-            backgroundCanvas.style.display = 'none';
-            return;
-        }
-
-        backgroundGl.useProgram(backgroundProgram);
-        var vertices = new Float32Array([
-            -1, -1,  1, -1, -1, 1,
-            -1,  1,  1, -1,  1, 1
-        ]);
-        var positionBuffer = backgroundGl.createBuffer();
-        backgroundGl.bindBuffer(backgroundGl.ARRAY_BUFFER, positionBuffer);
-        backgroundGl.bufferData(backgroundGl.ARRAY_BUFFER, vertices, backgroundGl.STATIC_DRAW);
-        backgroundPositionLocation = backgroundGl.getAttribLocation(backgroundProgram, 'a_position');
-        backgroundGl.enableVertexAttribArray(backgroundPositionLocation);
-        backgroundGl.vertexAttribPointer(backgroundPositionLocation, 2, backgroundGl.FLOAT, false, 0, 0);
-
-        backgroundCentersLocation = backgroundGl.getUniformLocation(backgroundProgram, 'u_centers[0]');
-        backgroundMassesLocation = backgroundGl.getUniformLocation(backgroundProgram, 'u_masses[0]');
-        backgroundCountLocation = backgroundGl.getUniformLocation(backgroundProgram, 'u_count');
-        backgroundResolutionLocation = backgroundGl.getUniformLocation(backgroundProgram, 'u_resolution');
-        backgroundTexture = backgroundGl.createTexture();
-        backgroundGl.activeTexture(backgroundGl.TEXTURE0);
-        backgroundGl.bindTexture(backgroundGl.TEXTURE_2D, backgroundTexture);
-        backgroundGl.texParameteri(backgroundGl.TEXTURE_2D, backgroundGl.TEXTURE_WRAP_S, backgroundGl.CLAMP_TO_EDGE);
-        backgroundGl.texParameteri(backgroundGl.TEXTURE_2D, backgroundGl.TEXTURE_WRAP_T, backgroundGl.CLAMP_TO_EDGE);
-        backgroundGl.texParameteri(backgroundGl.TEXTURE_2D, backgroundGl.TEXTURE_MIN_FILTER, backgroundGl.NEAREST);
-        backgroundGl.texParameteri(backgroundGl.TEXTURE_2D, backgroundGl.TEXTURE_MAG_FILTER, backgroundGl.NEAREST);
-        backgroundGl.uniform1i(backgroundGl.getUniformLocation(backgroundProgram, 'u_image'), 0);
-        backgroundGl.clearColor(0, 0, 0, 1);
-        backgroundGl.pixelStorei(backgroundGl.UNPACK_FLIP_Y_WEBGL, false);
-
-        var sky = new Image();
-        sky.crossOrigin = 'anonymous';
-        sky.onload = function() {
-            backgroundGl.bindTexture(backgroundGl.TEXTURE_2D, backgroundTexture);
-            backgroundGl.texImage2D(backgroundGl.TEXTURE_2D, 0, backgroundGl.RGBA, backgroundGl.RGBA, backgroundGl.UNSIGNED_BYTE, sky);
-            backgroundReady = true;
-            window.__gravityLensingReady = true;
-            renderBlackHoles();
-        };
-        sky.onerror = function() {
-            console.warn('Could not load the starfield image; showing the built-in fallback.');
-            backgroundReady = false;
-            window.__gravityLensingReady = false;
-            backgroundCanvas.style.display = 'none';
-        };
-        sky.src = 'https://images.unsplash.com/photo-1462331940025-496dfbfc7564?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=crop&w=1427&q=80';
-    }
-
-    function renderBlackHoles() {
-        if (!backgroundReady || !backgroundGl || !backgroundProgram) return;
-
-        var centers = new Float32Array(16 * 2);
-        var masses = new Float32Array(16);
-        var count = 0;
-        var offsetX = (screenWidth - backgroundSide) / 2;
-        var offsetY = (screenHeight - backgroundSide) / 2;
-
-        for (var i = 0; i < gravities.length && count < 16; i++) {
-            var g = gravities[i];
-            if (g.destroyed || g.currentRadius <= 0) continue;
-
-            var localX = g.x - offsetX;
-            var localY = g.y - offsetY;
-            centers[count * 2] = localX / backgroundSide;
-            centers[count * 2 + 1] = 1 - localY / backgroundSide;
-
-            // Mirror GravityPoint's original radius behavior:
-            // start at radius * 0.5, ease toward radius, and enlarge after mergers.
-            var targetLensMass = blackHoleMass * Math.max(0, g.currentRadius) / G_POINT_RADIUS;
-            g._lensMass += (targetLensMass - g._lensMass) * 0.03;
-            if (Math.abs(targetLensMass - g._lensMass) < 0.5) {
-                g._lensMass = targetLensMass;
-            }
-            masses[count] = g._lensMass * 0.00001;
-            count++;
-        }
-
-        backgroundGl.viewport(0, 0, backgroundSide, backgroundSide);
-        backgroundGl.useProgram(backgroundProgram);
-        backgroundGl.activeTexture(backgroundGl.TEXTURE0);
-        backgroundGl.bindTexture(backgroundGl.TEXTURE_2D, backgroundTexture);
-        backgroundGl.uniform2f(backgroundResolutionLocation, backgroundSide, backgroundSide);
-        backgroundGl.uniform2fv(backgroundCentersLocation, centers);
-        backgroundGl.uniform1fv(backgroundMassesLocation, masses);
-        backgroundGl.uniform1i(backgroundCountLocation, count);
-        backgroundGl.drawArrays(backgroundGl.TRIANGLES, 0, 6);
+        grad = context.createRadialGradient(cx, cy, 0, cx, cy, Math.sqrt(cx * cx + cy * cy));
+        grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0.35)');
     }
 
     function mouseMove(e) {
@@ -650,10 +441,8 @@ Particle.prototype = (function(o) {
     canvas  = document.getElementById('c');
     bufferCvs = document.createElement('canvas');
 
-    window.__gravityLensingReady = false;
     window.addEventListener('resize', resize, false);
     resize(null);
-    initBlackHoleRenderer();
 
     addParticle(2000);
 
@@ -699,7 +488,12 @@ Particle.prototype = (function(o) {
 
         var i, len, g, p;
 
-        context.clearRect(0, 0, screenWidth, screenHeight);
+        context.save();
+        context.fillStyle = BACKGROUND_COLOR;
+        context.fillRect(0, 0, screenWidth, screenHeight);
+        context.fillStyle = grad;
+        context.fillRect(0, 0, screenWidth, screenHeight);
+        context.restore();
 
         for (i = 0, len = gravities.length; i < len; i++) {
             g = gravities[i];
@@ -711,8 +505,6 @@ Particle.prototype = (function(o) {
                 i--;
             }
         }
-
-        renderBlackHoles();
 
         bufferCtx.save();
         bufferCtx.globalCompositeOperation = 'destination-out';
