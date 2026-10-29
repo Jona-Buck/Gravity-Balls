@@ -5,7 +5,7 @@ var bgUrl = 'https://images.unsplash.com/photo-1462331940025-496dfbfc7564?ixlib=
 var blackholeMass = 1500;
 var curblackholeMass = 0;
 
-var canvas, gl; // canvas and webgl context
+var canvas, gl, program; // canvas and webgl context
 
 var shaderScript;
 var shaderSource;
@@ -75,7 +75,7 @@ function init(image) {
     gl.shaderSource(fragmentShader, shaderSource);
     gl.compileShader(fragmentShader);
 
-    var program = gl.createProgram();
+    program = gl.createProgram();
     gl.attachShader(program, vertexShader);
     gl.attachShader(program, fragmentShader);
     gl.linkProgram(program);
