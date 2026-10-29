@@ -22,6 +22,7 @@ canvas {
     position: absolute;
     top: 0;
     left: 0;
+    touch-action: none;
 }
 
 .info {
@@ -445,9 +446,42 @@ Particle.prototype = (function(o) {
 
     addParticle(2000);
 
+    // Mouse and pen input.
     canvas.addEventListener('mousemove', mouseMove, false);
     canvas.addEventListener('mousedown', mouseDown, false);
     canvas.addEventListener('mouseup', mouseUp, false);
+
+    // Touch input: map taps/drags to the same handlers as mouse input.
+    // Prevent page scrolling and avoid duplicate handling via synthetic mouse events.
+    canvas.addEventListener('touchstart', function(e) {
+        e.preventDefault();
+        if (e.changedTouches.length) {
+            var t = e.changedTouches[0];
+            mouse.set(t.clientX, t.clientY);
+            mouseDown(t);
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', function(e) {
+        e.preventDefault();
+        if (e.touches.length) {
+            var t = e.touches[0];
+            mouseMove(t);
+            for (var i = 0; i < gravities.length; i++) {
+                if (gravities[i].dragging) gravities[i].drag(mouse);
+            }
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', function(e) {
+        e.preventDefault();
+        mouseUp(e);
+    }, { passive: false });
+
+    canvas.addEventListener('touchcancel', function(e) {
+        mouseUp(e);
+    }, false);
+
     canvas.addEventListener('dblclick', doubleClick, false);
 
     var loop = function() {
