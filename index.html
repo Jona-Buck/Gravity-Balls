@@ -246,7 +246,7 @@ GravityPoint.prototype = (function(o) {
             distanceSq = dx * dx + dy * dy;
 
             if (distanceSq > 0) {
-                strength = this.gravity / Math.sqrt(distanceSq);
+                strength = this.gravity * 120 / (Math.max(distanceSq, 25) * Math.sqrt(Math.max(distanceSq, 25)));
                 particle._speed.x += dx * strength;
                 particle._speed.y += dy * strength;
             }
@@ -295,7 +295,7 @@ GravityPoint.prototype = (function(o) {
 
             // Reuse the distance already calculated and avoid temporary Vectors.
             if (distanceSq > 0) {
-                strength = this.gravity / Math.sqrt(distanceSq);
+                strength = this.gravity * 120 / (Math.max(distanceSq, 25) * Math.sqrt(Math.max(distanceSq, 25)));
                 g._speed.x += dx * strength;
                 g._speed.y += dy * strength;
             }
@@ -509,29 +509,28 @@ Particle.prototype = (function(o) {
 
     canvas.addEventListener('dblclick', doubleClick, false);
 
-    // Map a particle's visible position through every gravity well.
-    // Each lens acts on the already-distorted result of the previous lens,
-    // so nearby wells warp one another's distortion instead of drawing rings.
-    function distortPoint(x, y) {
-        var i, g, dx, dy, d2, soften, strength, angle, c, s, nx, ny;
-        for (i = 0; i < gravities.length; i++) {
-            g = gravities[i];
-            if (g.destroyed) continue;
-            dx = x - g.x;
-            dy = y - g.y;
-            d2 = dx * dx + dy * dy;
-            soften = Math.max(8, g.currentRadius * 0.9);
-            strength = Math.pow(Math.max(5, g.currentRadius * 2.15), 2);
-            angle = Math.min(0.72, strength / (d2 + soften * soften));
-            if (d2 < 0.0001 || angle < 0.00015) continue;
-
-            // Tangential displacement approximates the shear of a gravitational lens.
-            c = Math.cos(angle);
-            s = Math.sin(angle);
-            nx = dx * c - dy * s;
-            ny = dx * s + dy * c;
-            x = g.x + nx;
-            y = g.y + ny;
+    // Multi-lens coordinate mapping. Each well bends the point, then later
+    // wells bend the result; a second sweep lets the wells bend one another.
+    // This is a screen-space approximation of a multi-point gravitational lens.
+    function distortPoint(sourceX, sourceY) {
+        var x = sourceX, y = sourceY;
+        var pass, i, g, dx, dy, d2, soft, mu, bend, cap;
+        for (pass = 0; pass < 2; pass++) {
+            for (i = 0; i < gravities.length; i++) {
+                g = gravities[i];
+                if (g.destroyed) continue;
+                dx = x - g.x;
+                dy = y - g.y;
+                d2 = dx * dx + dy * dy;
+                soft = Math.max(2.5, g.currentRadius * 0.24);
+                // The lensing strength scales with mass, not with a decorative ring.
+                mu = Math.max(28, g.gravity * 1800);
+                bend = mu / (d2 + soft * soft);
+                cap = 0.82;
+                if (bend > cap) bend = cap;
+                x += dx * bend;
+                y += dy * bend;
+            }
         }
         return { x: x, y: y };
     }
@@ -575,8 +574,8 @@ Particle.prototype = (function(o) {
             p = particles[i];
             p.update();
 
-            // Keep the simulation coordinates untouched; only the rendered light
-            // is lensed. Transform both ends of each trail through all wells.
+            // Keep physical positions separate from the optical image.
+            // Both trail endpoints pass through the same combined lens field.
             var visibleNow = distortPoint(p.x, p.y);
             var visibleBefore = distortPoint(p._latest.x, p._latest.y);
             bufferCtx.moveTo(visibleNow.x, visibleNow.y);
