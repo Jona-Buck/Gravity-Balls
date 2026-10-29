@@ -370,12 +370,10 @@ Particle.prototype = (function(o) {
         backgroundCanvas, backgroundGl, backgroundProgram, backgroundTexture,
         backgroundPositionLocation, backgroundCentersLocation,
         backgroundMassesLocation, backgroundCountLocation,
-        backgroundResolutionLocation, backgroundClickedTimeLocation,
+        backgroundResolutionLocation,
         backgroundReady = false,
         backgroundSide = 0,
-        blackHoleMass = 1500,
-        blackHoleClicked = false,
-        blackHoleClickedTime = 0;
+        blackHoleMass = 1500;
 
     function resize(e) {
         screenWidth  = canvas.width  = window.innerWidth;
@@ -440,7 +438,6 @@ Particle.prototype = (function(o) {
             'uniform vec2 u_centers[16];',
             'uniform float u_masses[16];',
             'uniform int u_count;',
-            'uniform float u_clickedTime;',
             'void main() {',
             '  vec2 st = vec2(gl_FragCoord.x, u_resolution.y - gl_FragCoord.y) / u_resolution;',
             '  vec2 samplePoint = st;',
@@ -452,7 +449,7 @@ Particle.prototype = (function(o) {
             '      float dy = samplePoint.y - mt.y;',
             '      float dist = sqrt(dx * dx + dy * dy);',
             '      float pull = u_masses[i] / (dist * dist);',
-            '      float cs = cos((pull + u_clickedTime) * PI);',
+            '      float cs = cos(pull * PI)',
             '      float sn = sin(pull * 0.0);',
             '      float nx = (cs * (samplePoint.x - mt.x)) + (sn * (samplePoint.y - mt.y)) + mt.x;',
             '      float ny = (cs * (samplePoint.y - mt.y)) - (sn * (samplePoint.x - mt.x)) + mt.y;',
@@ -515,7 +512,6 @@ Particle.prototype = (function(o) {
         backgroundMassesLocation = backgroundGl.getUniformLocation(backgroundProgram, 'u_masses[0]');
         backgroundCountLocation = backgroundGl.getUniformLocation(backgroundProgram, 'u_count');
         backgroundResolutionLocation = backgroundGl.getUniformLocation(backgroundProgram, 'u_resolution');
-        backgroundClickedTimeLocation = backgroundGl.getUniformLocation(backgroundProgram, 'u_clickedTime');
         backgroundTexture = backgroundGl.createTexture();
         backgroundGl.activeTexture(backgroundGl.TEXTURE0);
         backgroundGl.bindTexture(backgroundGl.TEXTURE_2D, backgroundTexture);
@@ -547,12 +543,6 @@ Particle.prototype = (function(o) {
 
     function renderBlackHoles() {
         if (!backgroundReady || !backgroundGl || !backgroundProgram) return;
-
-        if (blackHoleClicked) {
-            blackHoleClickedTime += 0.03;
-        } else if (blackHoleClickedTime > 0) {
-            blackHoleClickedTime -= blackHoleClickedTime * 0.015;
-        }
 
         var centers = new Float32Array(16 * 2);
         var masses = new Float32Array(16);
@@ -588,7 +578,6 @@ Particle.prototype = (function(o) {
         backgroundGl.uniform2fv(backgroundCentersLocation, centers);
         backgroundGl.uniform1fv(backgroundMassesLocation, masses);
         backgroundGl.uniform1i(backgroundCountLocation, count);
-        backgroundGl.uniform1f(backgroundClickedTimeLocation, blackHoleClickedTime);
         backgroundGl.drawArrays(backgroundGl.TRIANGLES, 0, 6);
     }
 
@@ -608,7 +597,6 @@ Particle.prototype = (function(o) {
     }
 
     function mouseDown(e) {
-        blackHoleClicked = true;
         for (var i = gravities.length - 1; i >= 0; i--) {
             if (gravities[i].isMouseOver) {
                 gravities[i].startDrag(mouse);
@@ -622,7 +610,6 @@ Particle.prototype = (function(o) {
     }
 
     function mouseUp(e) {
-        blackHoleClicked = false;
         for (var i = 0, len = gravities.length; i < len; i++) {
             if (gravities[i].dragging) {
                 gravities[i].endDrag();
