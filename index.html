@@ -367,7 +367,8 @@ Particle.prototype = (function(o) {
         particles = [],
         backgroundCanvas, backgroundGl, backgroundProgram, backgroundTexture,
         backgroundPositionLocation, backgroundCentersLocation,
-        backgroundMassesLocation, backgroundCountLocation, backgroundReady = false,
+        backgroundMassesLocation, backgroundRadiiLocation, backgroundCountLocation,
+        backgroundReady = false,
         backgroundSide = 0;
 
     function resize(e) {
@@ -430,24 +431,36 @@ Particle.prototype = (function(o) {
             'uniform sampler2D u_image;',
             'uniform vec2 u_centers[16];',
             'uniform float u_masses[16];',
+            'uniform float u_radii[16];',
             'uniform int u_count;',
             'varying vec2 v_uv;',
             'void main() {',
             '  vec2 samplePoint = v_uv;',
             '  float shade = 0.0;',
+            '  float eventHorizon = 0.0;',
             '  for (int i = 0; i < 16; i++) {',
             '    if (i < u_count) {',
             '      vec2 center = u_centers[i];',
             '      vec2 offset = samplePoint - center;',
-            '      float distanceSquared = max(dot(offset, offset), 0.000025);',
-            '      float pull = u_masses[i] / distanceSquared;',
-            '      float squeeze = cos(pull * 3.14159265);',
-            '      samplePoint = center + offset * squeeze;',
-            '      shade = min(1.0, shade + pull * 0.25);',
+            '      float distanceToCore = length(offset);',
+            '      float coreRadius = max(u_radii[i] * 0.68, 0.0025);',
+            '      float field = u_masses[i] / (dot(offset, offset) + coreRadius * coreRadius * 2.2);',
+            '      float bendAngle = min(field * 0.16, 1.35);',
+            '      float cs = cos(bendAngle);',
+            '      float sn = sin(bendAngle);',
+            '      vec2 bentOffset = vec2(offset.x * cs - offset.y * sn, offset.x * sn + offset.y * cs);',
+            '      float radialCompression = 1.0 - 0.15 * exp(-distanceToCore / (coreRadius * 3.8));',
+            '      samplePoint = center + bentOffset * radialCompression;',
+            '      float localShade = 1.0 - exp(-field * 0.10);',
+            '      shade = 1.0 - (1.0 - shade) * (1.0 - localShade);',
+            '      float coreMask = 1.0 - smoothstep(coreRadius * 0.6, coreRadius * 1.2, distanceToCore);',
+            '      eventHorizon = max(eventHorizon, coreMask);',
             '    }',
             '  }',
             '  vec3 imageColor = texture2D(u_image, clamp(samplePoint, vec2(0.001), vec2(0.999))).rgb;',
-            '  gl_FragColor = vec4(max(imageColor - vec3(shade), vec3(0.0)), 1.0);',
+            '  imageColor *= (1.0 - shade);',
+            '  imageColor *= (1.0 - eventHorizon);',
+            '  gl_FragColor = vec4(imageColor, 1.0);',
             '}'
         ].join('\n');
 
@@ -494,6 +507,7 @@ Particle.prototype = (function(o) {
 
         backgroundCentersLocation = backgroundGl.getUniformLocation(backgroundProgram, 'u_centers[0]');
         backgroundMassesLocation = backgroundGl.getUniformLocation(backgroundProgram, 'u_masses[0]');
+        backgroundRadiiLocation = backgroundGl.getUniformLocation(backgroundProgram, 'u_radii[0]');
         backgroundCountLocation = backgroundGl.getUniformLocation(backgroundProgram, 'u_count');
         backgroundTexture = backgroundGl.createTexture();
         backgroundGl.activeTexture(backgroundGl.TEXTURE0);
@@ -529,6 +543,7 @@ Particle.prototype = (function(o) {
 
         var centers = new Float32Array(16 * 2);
         var masses = new Float32Array(16);
+        var radii = new Float32Array(16);
         var count = 0;
         var offsetX = (screenWidth - backgroundSide) / 2;
         var offsetY = (screenHeight - backgroundSide) / 2;
@@ -541,6 +556,7 @@ Particle.prototype = (function(o) {
             var localY = g.y - offsetY;
             centers[count * 2] = localX / backgroundSide;
             centers[count * 2 + 1] = 1 - localY / backgroundSide;
+            radii[count] = Math.max(g.currentRadius, g.radius) / backgroundSide;
             masses[count] = Math.min(0.05, 0.015 * Math.sqrt(Math.max(1, g.radius) / 10));
             count++;
         }
@@ -551,6 +567,7 @@ Particle.prototype = (function(o) {
         backgroundGl.bindTexture(backgroundGl.TEXTURE_2D, backgroundTexture);
         backgroundGl.uniform2fv(backgroundCentersLocation, centers);
         backgroundGl.uniform1fv(backgroundMassesLocation, masses);
+        backgroundGl.uniform1fv(backgroundRadiiLocation, radii);
         backgroundGl.uniform1i(backgroundCountLocation, count);
         backgroundGl.drawArrays(backgroundGl.TRIANGLES, 0, 6);
     }
