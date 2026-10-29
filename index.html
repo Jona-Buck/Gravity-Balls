@@ -9,8 +9,7 @@ body {
     font-family: Helvetica sans-serif;
     padding: 0;
     margin: 0;
-    background-color: #010203;
-    background-image: radial-gradient(ellipse at 50% 45%, #0b3338 0%, #061216 45%, #010203 100%);
+    background-color: #222;
     overflow: hidden;
     -webkit-user-select: none;
        -moz-user-select: none;
@@ -24,15 +23,6 @@ canvas {
     top: 0;
     left: 0;
     touch-action: none;
-}
-
-#c {
-    z-index: 2;
-}
-
-.lensing-canvas {
-    z-index: 1;
-    pointer-events: none;
 }
 
 .info {
@@ -353,7 +343,8 @@ Particle.prototype = (function(o) {
 
 (function() {
 
-    var PARTICLE_RADIUS       = 1,
+    var BACKGROUND_COLOR      = 'rgba(11, 51, 56, 1)',
+        PARTICLE_RADIUS       = 1,
         G_POINT_RADIUS        = 10,
         G_POINT_RADIUS_LIMITS = 65;
 
@@ -363,10 +354,7 @@ Particle.prototype = (function(o) {
         mouse = new Vector(),
         gravities = [],
         particles = [],
-        lensCanvas, lensGl, lensProgram, lensTexture,
-        lensPositionLocation, lensResolutionLocation, lensCountLocation,
-        lensCentersLocation, lensRadiiLocation, lensStrengthsLocation,
-        lensingAvailable = false;
+        grad;
 
     function resize(e) {
         screenWidth  = canvas.width  = window.innerWidth;
@@ -376,166 +364,12 @@ Particle.prototype = (function(o) {
         context   = canvas.getContext('2d');
         bufferCtx = bufferCvs.getContext('2d');
 
-        if (lensCanvas) {
-            lensCanvas.width = screenWidth;
-            lensCanvas.height = screenHeight;
-        }
-    }
+        var cx = canvas.width * 0.5,
+            cy = canvas.height * 0.5;
 
-    function initLensing() {
-        lensCanvas = document.createElement('canvas');
-        lensCanvas.className = 'lensing-canvas';
-        lensCanvas.setAttribute('aria-hidden', 'true');
-        document.body.insertBefore(lensCanvas, canvas);
-        lensCanvas.width = screenWidth;
-        lensCanvas.height = screenHeight;
-
-        lensGl = lensCanvas.getContext('webgl', {
-            alpha: true,
-            antialias: false,
-            premultipliedAlpha: false
-        }) || lensCanvas.getContext('experimental-webgl');
-
-        if (!lensGl) {
-            lensCanvas.style.display = 'none';
-            return;
-        }
-
-        var vertexSource = [
-            'attribute vec2 a_position;',
-            'varying vec2 v_uv;',
-            'void main() {',
-            '  v_uv = a_position * 0.5 + 0.5;',
-            '  gl_Position = vec4(a_position, 0.0, 1.0);',
-            '}'
-        ].join('\n');
-
-        var fragmentSource = [
-            'precision mediump float;',
-            'uniform sampler2D u_particles;',
-            'uniform vec2 u_resolution;',
-            'uniform int u_count;',
-            'uniform vec2 u_centers[16];',
-            'uniform float u_radii[16];',
-            'uniform float u_strengths[16];',
-            'varying vec2 v_uv;',
-            'void main() {',
-            '  float aspect = u_resolution.x / u_resolution.y;',
-            '  vec2 warped = v_uv;',
-            '  float totalPull = 0.0;',
-            '  for (int i = 0; i < 16; i++) {',
-            '    if (i >= u_count) break;',
-            '    vec2 center = u_centers[i];',
-            '    vec2 delta = vec2((warped.x - center.x) * aspect, warped.y - center.y);',
-            '    float dist = max(length(delta), 0.0001);',
-            '    float radius = max(u_radii[i], 0.0015);',
-            '    float angle = min(u_strengths[i] / (dist * dist + radius * radius * 0.25), 1.15);',
-            '    float sn = sin(angle);',
-            '    float cs = cos(angle);',
-            '    delta = vec2(delta.x * cs - delta.y * sn, delta.x * sn + delta.y * cs);',
-            '    warped = vec2(center.x + delta.x / aspect, center.y + delta.y);',
-            '    totalPull += angle;',
-            '  }',
-            '  vec2 sampleUV = clamp(warped, vec2(0.001), vec2(0.999));',
-            '  vec4 color = texture2D(u_particles, sampleUV);',
-            '  color.rgb *= 1.0 - min(totalPull * 0.12, 0.30);',
-            '  gl_FragColor = color;',
-            '}'
-        ].join('\n');
-
-        function compileShader(type, source) {
-            var shader = lensGl.createShader(type);
-            lensGl.shaderSource(shader, source);
-            lensGl.compileShader(shader);
-            if (!lensGl.getShaderParameter(shader, lensGl.COMPILE_STATUS)) {
-                console.warn('Gravity Balls lens shader:', lensGl.getShaderInfoLog(shader));
-                lensGl.deleteShader(shader);
-                return null;
-            }
-            return shader;
-        }
-
-        var vertexShader = compileShader(lensGl.VERTEX_SHADER, vertexSource);
-        var fragmentShader = compileShader(lensGl.FRAGMENT_SHADER, fragmentSource);
-        if (!vertexShader || !fragmentShader) {
-            lensCanvas.style.display = 'none';
-            return;
-        }
-
-        lensProgram = lensGl.createProgram();
-        lensGl.attachShader(lensProgram, vertexShader);
-        lensGl.attachShader(lensProgram, fragmentShader);
-        lensGl.linkProgram(lensProgram);
-        if (!lensGl.getProgramParameter(lensProgram, lensGl.LINK_STATUS)) {
-            console.warn('Gravity Balls lens program:', lensGl.getProgramInfoLog(lensProgram));
-            lensCanvas.style.display = 'none';
-            return;
-        }
-
-        lensGl.useProgram(lensProgram);
-        var vertices = new Float32Array([
-            -1, -1,  1, -1, -1, 1,
-            -1,  1,  1, -1,  1, 1
-        ]);
-        var positionBuffer = lensGl.createBuffer();
-        lensGl.bindBuffer(lensGl.ARRAY_BUFFER, positionBuffer);
-        lensGl.bufferData(lensGl.ARRAY_BUFFER, vertices, lensGl.STATIC_DRAW);
-        lensPositionLocation = lensGl.getAttribLocation(lensProgram, 'a_position');
-        lensGl.enableVertexAttribArray(lensPositionLocation);
-        lensGl.vertexAttribPointer(lensPositionLocation, 2, lensGl.FLOAT, false, 0, 0);
-
-        lensResolutionLocation = lensGl.getUniformLocation(lensProgram, 'u_resolution');
-        lensCountLocation = lensGl.getUniformLocation(lensProgram, 'u_count');
-        lensCentersLocation = lensGl.getUniformLocation(lensProgram, 'u_centers[0]');
-        lensRadiiLocation = lensGl.getUniformLocation(lensProgram, 'u_radii[0]');
-        lensStrengthsLocation = lensGl.getUniformLocation(lensProgram, 'u_strengths[0]');
-        lensTexture = lensGl.createTexture();
-        lensGl.activeTexture(lensGl.TEXTURE0);
-        lensGl.bindTexture(lensGl.TEXTURE_2D, lensTexture);
-        lensGl.texParameteri(lensGl.TEXTURE_2D, lensGl.TEXTURE_WRAP_S, lensGl.CLAMP_TO_EDGE);
-        lensGl.texParameteri(lensGl.TEXTURE_2D, lensGl.TEXTURE_WRAP_T, lensGl.CLAMP_TO_EDGE);
-        lensGl.texParameteri(lensGl.TEXTURE_2D, lensGl.TEXTURE_MIN_FILTER, lensGl.LINEAR);
-        lensGl.texParameteri(lensGl.TEXTURE_2D, lensGl.TEXTURE_MAG_FILTER, lensGl.LINEAR);
-        lensGl.pixelStorei(lensGl.UNPACK_FLIP_Y_WEBGL, true);
-        lensGl.uniform1i(lensGl.getUniformLocation(lensProgram, 'u_particles'), 0);
-        lensGl.disable(lensGl.BLEND);
-        lensGl.clearColor(0, 0, 0, 0);
-        lensingAvailable = true;
-    }
-
-    function renderLensing() {
-        if (!lensingAvailable) return;
-
-        var gl = lensGl;
-        var centers = new Float32Array(16 * 2);
-        var radii = new Float32Array(16);
-        var strengths = new Float32Array(16);
-        var count = 0;
-
-        for (var i = 0; i < gravities.length && count < 16; i++) {
-            var g = gravities[i];
-            if (g.destroyed || g.currentRadius <= 0) continue;
-            var r = Math.max(g.currentRadius, g.radius) / screenHeight;
-            centers[count * 2] = g.x / screenWidth;
-            centers[count * 2 + 1] = 1 - g.y / screenHeight;
-            radii[count] = r;
-            strengths[count] = r * r * 2.6 + 0.00002;
-            count++;
-        }
-
-        gl.viewport(0, 0, lensCanvas.width, lensCanvas.height);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-        gl.useProgram(lensProgram);
-        gl.uniform2f(lensResolutionLocation, screenWidth, screenHeight);
-        gl.uniform1i(lensCountLocation, count);
-        gl.uniform2fv(lensCentersLocation, centers);
-        gl.uniform1fv(lensRadiiLocation, radii);
-        gl.uniform1fv(lensStrengthsLocation, strengths);
-
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, lensTexture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bufferCvs);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        grad = context.createRadialGradient(cx, cy, 0, cx, cy, Math.sqrt(cx * cx + cy * cy));
+        grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0.35)');
     }
 
     function mouseMove(e) {
@@ -609,7 +443,6 @@ Particle.prototype = (function(o) {
 
     window.addEventListener('resize', resize, false);
     resize(null);
-    initLensing();
 
     addParticle(2000);
 
@@ -655,7 +488,12 @@ Particle.prototype = (function(o) {
 
         var i, len, g, p;
 
-        context.clearRect(0, 0, screenWidth, screenHeight);
+        context.save();
+        context.fillStyle = BACKGROUND_COLOR;
+        context.fillRect(0, 0, screenWidth, screenHeight);
+        context.fillStyle = grad;
+        context.fillRect(0, 0, screenWidth, screenHeight);
+        context.restore();
 
         for (i = 0, len = gravities.length; i < len; i++) {
             g = gravities[i];
@@ -700,11 +538,7 @@ Particle.prototype = (function(o) {
         bufferCtx.fill();
         bufferCtx.restore();
 
-        if (lensingAvailable) {
-            renderLensing();
-        } else {
-            context.drawImage(bufferCvs, 0, 0);
-        }
+        context.drawImage(bufferCvs, 0, 0);
 
         requestAnimationFrame(loop);
     };
