@@ -235,13 +235,10 @@ GravityPoint.prototype = (function(o) {
         if (this.destroyed) return;
 
         var particles = this._targets.particles,
-            i, len, particle, dx, dy, distanceSq, strength, distance,
-            softening, sourceMass;
+            i, len, particle, dx, dy, distanceSq, strength;
 
-        // Inverse-square gravity with softening. The larger scale makes distant
-        // particles respond visibly while the softening prevents near-singular kicks.
-        sourceMass = Math.max(0.05, this.gravity);
-        softening = Math.max(18, this.currentRadius * 0.85);
+        // Apply gravity with scalar math instead of allocating several Vector
+        // objects for every particle on every frame.
         for (i = 0, len = particles.length; i < len; i++) {
             particle = particles[i];
             dx = this.x - particle.x;
@@ -249,8 +246,7 @@ GravityPoint.prototype = (function(o) {
             distanceSq = dx * dx + dy * dy;
 
             if (distanceSq > 0) {
-                distance = Math.sqrt(Math.max(distanceSq, 25));
-                strength = sourceMass * 45000 / ((distanceSq + softening * softening) * distance);
+                strength = this.gravity * 120 / (Math.max(distanceSq, 25) * Math.sqrt(Math.max(distanceSq, 25)));
                 particle._speed.x += dx * strength;
                 particle._speed.y += dy * strength;
             }
@@ -268,7 +264,6 @@ GravityPoint.prototype = (function(o) {
 
         var gravities = this._targets.gravities,
             g, dx, dy, distanceSq, contactDistance, strength, absorptionScale,
-            distance, softening, sourceMass,
             area = this.radius * this.radius * Math.PI, garea;
 
         for (i = 0, len = gravities.length; i < len; i++) {
@@ -298,31 +293,20 @@ GravityPoint.prototype = (function(o) {
                 this.radius = Math.sqrt((area + garea) / Math.PI);
             }
 
-            // Mutual attraction: each source accelerates every other body according
-            // to its gravity/mass. Softening avoids unstable close-range impulses.
+            // Reuse the distance already calculated and avoid temporary Vectors.
             if (distanceSq > 0) {
-                distance = Math.sqrt(Math.max(distanceSq, 25));
-                softening = Math.max(24, (this.currentRadius + g.currentRadius) * 0.55);
-                sourceMass = Math.max(0.05, this.gravity);
-                strength = sourceMass * 45000 / ((distanceSq + softening * softening) * distance);
+                strength = this.gravity * 120 / (Math.max(distanceSq, 25) * Math.sqrt(Math.max(distanceSq, 25)));
                 g._speed.x += dx * strength;
                 g._speed.y += dy * strength;
             }
         }
 
-        if (GravityPoint.interferenceToPoint && !this.dragging) {
-            // Preserve momentum with damping instead of deleting velocity each frame.
-            this._speed.scale(0.985);
-            var pointSpeedSq = this._speed.x * this._speed.x + this._speed.y * this._speed.y;
-            var maxPointSpeed = 5.5;
-            if (pointSpeedSq > maxPointSpeed * maxPointSpeed) {
-                this._speed.scale(maxPointSpeed / Math.sqrt(pointSpeedSq));
-            }
+        if (GravityPoint.interferenceToPoint && !this.dragging)
             this.add(this._speed);
-        } else if (this.dragging) {
-            this._speed.x = 0;
-            this._speed.y = 0;
-        }
+
+        // Reuse the speed Vector instead of allocating a new one every frame.
+        this._speed.x = 0;
+        this._speed.y = 0;
 
         if (this.currentRadius > GravityPoint.RADIUS_LIMIT) this.collapse();
 
