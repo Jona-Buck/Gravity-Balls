@@ -27,10 +27,9 @@ uniform vec2 u_resolution;
 uniform vec2 u_mouse;
 uniform float u_mass;
 uniform float u_time;
-uniform float u_clickedTime;
 
 vec2 rotate(vec2 mt, vec2 st, float angle){
-	float cos = cos((angle + u_clickedTime) * PI); // try replacing * 1.0 with * PI
+	float cos = cos(angle * PI); // click/hold animation removed
 	float sin = sin(angle * 0.0); // try removing the * 0.0
 	
 	// Uncomment these two lines for realism
