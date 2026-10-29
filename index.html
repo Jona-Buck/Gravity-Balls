@@ -413,37 +413,49 @@ Particle.prototype = (function(o) {
             'uniform float u_holeMasses[12];',
             'uniform int u_holeCount;',
             'varying vec2 v_uv;',
-            'vec2 huffmanRotate(vec2 center, vec2 point, float pull) {',
-            '  float cosine = cos(pull * PI);',
-            '  float sine = sin(0.0);',
-            '  vec2 delta = point - center;',
-            '  return vec2(cosine * delta.x + sine * delta.y, cosine * delta.y - sine * delta.x) + center;',
+            '',
+            'vec2 rotate(vec2 mt, vec2 st, float angle) {',
+            '  float cosine = cos(angle * PI);',
+            '  float sine = sin(angle * 0.0);',
+            '  float nx = (cosine * (st.x - mt.x)) + (sine * (st.y - mt.y)) + mt.x;',
+            '  float ny = (cosine * (st.y - mt.y)) - (sine * (st.x - mt.x)) + mt.y;',
+            '  return vec2(nx, ny);',
             '}',
+            '',
             'void main() {',
-            '  vec2 point = v_uv;',
-            '  float strongestPull = 0.0;',
+            '  vec2 st = vec2(gl_FragCoord.x, u_resolution.y - gl_FragCoord.y) / u_resolution;',
+            '  vec2 warped = st;',
+            '  float totalPull = 0.0;',
             '  for (int i = 0; i < 12; i++) {',
             '    if (i < u_holeCount) {',
-            '      vec2 center = u_holeCenters[i];',
-            '      vec2 delta = point - center;',
-            '      float dist = max(length(delta), 0.00001);',
+            '      vec2 mt = u_holeCenters[i];',
+            '      float dx = warped.x - mt.x;',
+            '      float dy = warped.y - mt.y;',
+            '      float dist = sqrt(dx * dx + dy * dy);',
+            '      dist = max(dist, 0.000001);',
             '      float pull = u_holeMasses[i] / (dist * dist);',
-            '      point = huffmanRotate(center, point, pull);',
-            '      strongestPull = max(strongestPull, pull);',
+            '      warped = rotate(mt, warped, pull);',
+            '      totalPull += pull;',
             '    }',
             '  }',
+            '',
             '  float screenAspect = u_resolution.x / u_resolution.y;',
             '  float imageAspect = u_imageResolution.x / u_imageResolution.y;',
-            '  vec2 imageUV = point;',
+            '  vec2 imageUV = warped;',
             '  if (screenAspect > imageAspect) {',
-            '    imageUV.y = (point.y - 0.5) * (imageAspect / screenAspect) + 0.5;',
+            '    imageUV.y = (warped.y - 0.5) * (imageAspect / screenAspect) + 0.5;',
             '  } else {',
-            '    imageUV.x = (point.x - 0.5) * (screenAspect / imageAspect) + 0.5;',
+            '    imageUV.x = (warped.x - 0.5) * (screenAspect / imageAspect) + 0.5;',
             '  }',
-            '  vec4 imageColor = texture2D(u_image, clamp(imageUV, vec2(0.0), vec2(1.0)));',
-            '  vec3 color = imageColor.rgb - vec3(strongestPull * 0.25);',
+            '',
+            '  vec4 imgcolor = texture2D(u_image, clamp(imageUV, vec2(0.0), vec2(1.0)));',
+            '  vec3 color = vec3(',
+            '    imgcolor.r - (totalPull * 0.25),',
+            '    imgcolor.g - (totalPull * 0.25),',
+            '    imgcolor.b - (totalPull * 0.25)',
+            '  );',
             '  gl_FragColor = vec4(color, 1.0);',
-            '}',
+            '}'
         ].join('\\n');
 
         function compileShader(type, source) {
@@ -530,8 +542,8 @@ Particle.prototype = (function(o) {
                 var g = gravities[i];
                 if (g.destroyed) continue;
                 centers[count * 2] = g.x / screenWidth;
-                centers[count * 2 + 1] = 1 - g.y / screenHeight;
-                // Huffman's mass scale, following the gravity point as it grows.\n                masses[count] = 0.015 * (g.currentRadius / 5);
+                centers[count * 2 + 1] = g.y / screenHeight;
+                // Huffman's mass scale, following the gravity point as it grows.\n                masses[count] = 0.015 * (g.currentRadius / 10);
                 count++;
             }
 
