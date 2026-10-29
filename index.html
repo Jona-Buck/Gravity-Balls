@@ -498,8 +498,7 @@ Particle.prototype = (function(o) {
         lensGl.texParameteri(lensGl.TEXTURE_2D, lensGl.TEXTURE_MAG_FILTER, lensGl.LINEAR);
         lensGl.pixelStorei(lensGl.UNPACK_FLIP_Y_WEBGL, true);
         lensGl.uniform1i(lensGl.getUniformLocation(lensProgram, 'u_particles'), 0);
-        lensGl.enable(lensGl.BLEND);
-        lensGl.blendFunc(lensGl.SRC_ALPHA, lensGl.ONE_MINUS_SRC_ALPHA);
+        lensGl.disable(lensGl.BLEND);
         lensGl.clearColor(0, 0, 0, 0);
         lensingAvailable = true;
     }
