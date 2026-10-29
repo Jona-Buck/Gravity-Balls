@@ -354,7 +354,10 @@ Particle.prototype = (function(o) {
         mouse = new Vector(),
         gravities = [],
         particles = [],
-        grad;
+        grad,
+        starfield = new Image();
+
+    starfield.src = 'https://images.unsplash.com/photo-1462331940025-496dfbfc7564?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=crop&w=1427&q=80';
 
     function resize(e) {
         screenWidth  = canvas.width  = window.innerWidth;
@@ -489,8 +492,21 @@ Particle.prototype = (function(o) {
         var i, len, g, p;
 
         context.save();
-        context.fillStyle = BACKGROUND_COLOR;
-        context.fillRect(0, 0, screenWidth, screenHeight);
+        if (starfield.complete && starfield.naturalWidth > 0) {
+            var scale = Math.max(screenWidth / starfield.naturalWidth, screenHeight / starfield.naturalHeight);
+            var bgWidth = starfield.naturalWidth * scale;
+            var bgHeight = starfield.naturalHeight * scale;
+            context.drawImage(
+                starfield,
+                (screenWidth - bgWidth) / 2,
+                (screenHeight - bgHeight) / 2,
+                bgWidth,
+                bgHeight
+            );
+        } else {
+            context.fillStyle = BACKGROUND_COLOR;
+            context.fillRect(0, 0, screenWidth, screenHeight);
+        }
         context.fillStyle = grad;
         context.fillRect(0, 0, screenWidth, screenHeight);
         context.restore();
