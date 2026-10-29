@@ -46,6 +46,9 @@ function init(image) {
 	canvas.width  = window.innerWidth >= window.innerHeight ? window.innerWidth : window.innerHeight;
 	canvas.height = window.innerWidth >= window.innerHeight ? window.innerWidth : window.innerHeight;
 
+	// Match the previous Gravity Balls small-ball radius (~10 px).
+	blackholeMass = 40000000 / (canvas.width * canvas.width);
+
 	mouse = {x: originX/2, y: -(originY/2) + canvas.height, moved: false};
 	$(document).mousemove(function(e) {
 		mouse.x = e.pageX;
