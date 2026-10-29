@@ -4,6 +4,7 @@ var bgUrl = 'https://images.unsplash.com/photo-1462331940025-496dfbfc7564?ixlib=
 
 var blackholeMass = 1500;
 var curblackholeMass = 0;
+var blackholeSizeScale = 1;
 
 var canvas, gl; // canvas and webgl context
 
@@ -35,6 +36,9 @@ function init(image) {
 	gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
 	canvas.width  = window.innerWidth >= window.innerHeight ? window.innerWidth : window.innerHeight;
 	canvas.height = window.innerWidth >= window.innerHeight ? window.innerWidth : window.innerHeight;
+
+	// Keep the lensing effect compact, independent of viewport size.
+	blackholeSizeScale = (10 * 10) / (canvas.width * canvas.width * blackholeMass * 0.00001);
 
 
 	mouse = {x: originX/2, y: -(originY/2) + canvas.height, moved: false};
@@ -108,7 +112,7 @@ function init(image) {
 	*/
 	gl.uniform2f(locationOfResolution, canvas.width, canvas.height);
 	gl.uniform2f(locationOfMouse, mouse.x, mouse.y);
-	gl.uniform1f(locationOfMass, curblackholeMass*0.00001);
+	gl.uniform1f(locationOfMass, curblackholeMass*0.00001*blackholeSizeScale);
 	gl.uniform1f(locationOfTime, currentTime);
 
 
@@ -157,7 +161,7 @@ function render() {
 		mouse.x = (originX/2) + Math.sin(currentTime * 0.6) * -(originX * 0.35);
 	}
 
-	gl.uniform1f(locationOfMass, curblackholeMass*0.00001);
+	gl.uniform1f(locationOfMass, curblackholeMass*0.00001*blackholeSizeScale);
 	gl.uniform2f(locationOfMouse, mouse.x, mouse.y);
 	gl.uniform1f(locationOfTime, currentTime); // update the time uniform in our shader
 
@@ -184,6 +188,7 @@ window.addEventListener('resize', function(event){
 
 	canvas.width  = window.innerWidth >= window.innerHeight ? window.innerWidth : window.innerHeight;
 	canvas.height = window.innerWidth >= window.innerHeight ? window.innerWidth : window.innerHeight;
+	blackholeSizeScale = (10 * 10) / (canvas.width * canvas.width * blackholeMass * 0.00001);
 	gl.viewport(0, 0, canvas.width, canvas.height);
 	locationOfResolution = gl.getUniformLocation(program, "u_resolution");
 	gl.uniform2f(locationOfResolution, canvas.width, canvas.height);
