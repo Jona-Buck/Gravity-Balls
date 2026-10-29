@@ -516,7 +516,6 @@ Particle.prototype = (function(o) {
         if (gl && lensTexture && starfield.complete && starfield.naturalWidth > 0) {
             try {
                 gl.bindTexture(gl.TEXTURE_2D, lensTexture);
-                gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
                 gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, starfield);
                 lensTextureReady = true;
             } catch (error) {
