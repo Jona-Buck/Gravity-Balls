@@ -2,7 +2,6 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Gravity</title>
 
 <style>
@@ -23,7 +22,6 @@ canvas {
     position: absolute;
     top: 0;
     left: 0;
-    touch-action: none;
 }
 
 .info {
@@ -183,8 +181,6 @@ function GravityPoint(x, y, radius, targets) {
         gravities: targets.gravities || []
     };
     this._speed = new Vector();
-    // Per-hole phase keeps the visual accretion disks from moving in sync.
-    this._visualPhase = Math.random() * Math.PI * 2;
 }
 
 GravityPoint.RADIUS_LIMIT = 65;
@@ -231,25 +227,14 @@ GravityPoint.prototype = (function(o) {
         this._collapsing = true;
     },
 
-    render: function() {
+    render: function(ctx) {
         if (this.destroyed) return;
 
         var particles = this._targets.particles,
-            i, len, particle, dx, dy, distanceSq, strength;
+            i, len;
 
-        // Apply gravity with scalar math instead of allocating several Vector
-        // objects for every particle on every frame.
         for (i = 0, len = particles.length; i < len; i++) {
-            particle = particles[i];
-            dx = this.x - particle.x;
-            dy = this.y - particle.y;
-            distanceSq = dx * dx + dy * dy;
-
-            if (distanceSq > 0) {
-                strength = this.gravity * 120 / (Math.max(distanceSq, 25) * Math.sqrt(Math.max(distanceSq, 25)));
-                particle._speed.x += dx * strength;
-                particle._speed.y += dy * strength;
-            }
+            particles[i].addSpeed(Vector.sub(this, particles[i]).normalize().scale(this.gravity));
         }
 
         this._easeRadius = (this._easeRadius + (this.radius - this.currentRadius) * 0.07) * 0.95;
@@ -259,11 +244,12 @@ GravityPoint.prototype = (function(o) {
         if (this._collapsing) {
             this.radius *= 0.75;
             if (this.currentRadius < 1) this.destroyed = true;
+            this._draw(ctx);
             return;
         }
 
         var gravities = this._targets.gravities,
-            g, dx, dy, distanceSq, contactDistance, strength, absorptionScale,
+            g, absorp,
             area = this.radius * this.radius * Math.PI, garea;
 
         for (i = 0, len = gravities.length; i < len; i++) {
@@ -271,57 +257,54 @@ GravityPoint.prototype = (function(o) {
 
             if (g === this || g.destroyed) continue;
 
-            dx = this.x - g.x;
-            dy = this.y - g.y;
-            distanceSq = dx * dx + dy * dy;
-            contactDistance = (this.currentRadius + g.radius) * 0.85;
-
-            // Compare squared distances to avoid an unnecessary square root.
             if (
                 (this.currentRadius >= g.radius || this.dragging) &&
-                distanceSq < contactDistance * contactDistance
+                this.distanceTo(g) < (this.currentRadius + g.radius) * 0.85
             ) {
                 g.destroyed = true;
                 this.gravity += g.gravity;
 
-                absorptionScale = g.radius / this.radius * 0.5;
-                this._speed.x -= dx * absorptionScale;
-                this._speed.y -= dy * absorptionScale;
+                absorp = Vector.sub(g, this).scale(g.radius / this.radius * 0.5);
+                this.addSpeed(absorp);
 
                 garea = g.radius * g.radius * Math.PI;
                 this.currentRadius = Math.sqrt((area + garea * 3) / Math.PI);
                 this.radius = Math.sqrt((area + garea) / Math.PI);
             }
 
-            // Reuse the distance already calculated and avoid temporary Vectors.
-            if (distanceSq > 0) {
-                strength = this.gravity * 120 / (Math.max(distanceSq, 25) * Math.sqrt(Math.max(distanceSq, 25)));
-                g._speed.x += dx * strength;
-                g._speed.y += dy * strength;
-            }
+            g.addSpeed(Vector.sub(this, g).normalize().scale(this.gravity));
         }
 
         if (GravityPoint.interferenceToPoint && !this.dragging)
             this.add(this._speed);
 
-        // Reuse the speed Vector instead of allocating a new one every frame.
-        this._speed.x = 0;
-        this._speed.y = 0;
+        this._speed = new Vector();
 
         if (this.currentRadius > GravityPoint.RADIUS_LIMIT) this.collapse();
 
+        this._draw(ctx);
     },
 
     _draw: function(ctx) {
-        // The event horizon is the only drawn object: no rings, glow or disk.
-        // All visible bending is applied to the particle field itself.
-        if (this.currentRadius <= 0) return;
-        var r = Math.max(1.5, this.currentRadius * 0.78);
+        var grd, r;
+
         ctx.save();
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = '#000';
+
+        grd = ctx.createRadialGradient(this.x, this.y, this.radius, this.x, this.y, this.radius * 5);
+        grd.addColorStop(0, 'rgba(0, 0, 0, 0.1)');
+        grd.addColorStop(1, 'rgba(0, 0, 0, 0)');
         ctx.beginPath();
-        ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+        ctx.arc(this.x, this.y, this.radius * 5, 0, Math.PI * 2, false);
+        ctx.fillStyle = grd;
+        ctx.fill();
+
+        r = Math.random() * this.currentRadius * 0.7 + this.currentRadius * 0.3;
+        grd = ctx.createRadialGradient(this.x, this.y, r, this.x, this.y, this.currentRadius);
+        grd.addColorStop(0, 'rgba(0, 0, 0, 1)');
+        grd.addColorStop(1, Math.random() < 0.2 ? 'rgba(255, 196, 0, 0.15)' : 'rgba(103, 181, 191, 0.75)');
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.currentRadius, 0, Math.PI * 2, false);
+        ctx.fillStyle = grd;
         ctx.fill();
         ctx.restore();
     }
@@ -404,18 +387,12 @@ Particle.prototype = (function(o) {
     }
 
     function mouseDown(e) {
-        // Pointer position must be refreshed on touch: mobile devices may not
-        // send a pointermove before the first tap.
-        mouse.set(e.clientX, e.clientY);
-
         for (var i = gravities.length - 1; i >= 0; i--) {
-            if (!gravities[i].destroyed && gravities[i].hitTest(mouse)) {
-                gravities[i].isMouseOver = true;
+            if (gravities[i].isMouseOver) {
                 gravities[i].startDrag(mouse);
                 return;
             }
         }
-
         gravities.push(new GravityPoint(e.clientX, e.clientY, G_POINT_RADIUS, {
             particles: particles,
             gravities: gravities
@@ -468,72 +445,10 @@ Particle.prototype = (function(o) {
 
     addParticle(2000);
 
-    // Mouse/stylus: Pointer Events. Touch: explicit Touch Events as well,
-    // while ignoring touch Pointer Events so a single tap is never handled twice.
-    canvas.addEventListener('pointermove', function(e) {
-        if (e.pointerType !== 'touch') mouseMove(e);
-    }, false);
-    canvas.addEventListener('pointerdown', function(e) {
-        if (e.pointerType === 'touch') return;
-        if (canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
-        mouseDown(e);
-    }, false);
-    canvas.addEventListener('pointerup', function(e) {
-        if (e.pointerType === 'touch') return;
-        mouseUp(e);
-        if (canvas.hasPointerCapture && canvas.hasPointerCapture(e.pointerId)) {
-            canvas.releasePointerCapture(e.pointerId);
-        }
-    }, false);
-    canvas.addEventListener('pointercancel', function(e) {
-        if (e.pointerType !== 'touch') mouseUp(e);
-    }, false);
-
-    // Explicit touch handling for mobile browsers. preventDefault stops the
-    // page from scrolling/zooming while the user creates or drags a ball.
-    canvas.addEventListener('touchstart', function(e) {
-        e.preventDefault();
-        if (e.changedTouches.length) mouseDown(e.changedTouches[0]);
-    }, { passive: false });
-    canvas.addEventListener('touchmove', function(e) {
-        e.preventDefault();
-        if (e.touches.length) mouseMove(e.touches[0]);
-    }, { passive: false });
-    canvas.addEventListener('touchend', function(e) {
-        e.preventDefault();
-        mouseUp(e);
-    }, { passive: false });
-    canvas.addEventListener('touchcancel', function(e) {
-        mouseUp(e);
-    }, false);
-
+    canvas.addEventListener('mousemove', mouseMove, false);
+    canvas.addEventListener('mousedown', mouseDown, false);
+    canvas.addEventListener('mouseup', mouseUp, false);
     canvas.addEventListener('dblclick', doubleClick, false);
-
-    // Multi-lens coordinate mapping. Each well bends the point, then later
-    // wells bend the result; a second sweep lets the wells bend one another.
-    // This is a screen-space approximation of a multi-point gravitational lens.
-    function distortPoint(sourceX, sourceY) {
-        var x = sourceX, y = sourceY;
-        var pass, i, g, dx, dy, d2, soft, mu, bend, cap;
-        for (pass = 0; pass < 2; pass++) {
-            for (i = 0; i < gravities.length; i++) {
-                g = gravities[i];
-                if (g.destroyed) continue;
-                dx = x - g.x;
-                dy = y - g.y;
-                d2 = dx * dx + dy * dy;
-                soft = Math.max(2.5, g.currentRadius * 0.24);
-                // The lensing strength scales with mass, not with a decorative ring.
-                mu = Math.max(28, g.gravity * 1800);
-                bend = mu / (d2 + soft * soft);
-                cap = 0.82;
-                if (bend > cap) bend = cap;
-                x += dx * bend;
-                y += dy * bend;
-            }
-        }
-        return { x: x, y: y };
-    }
 
     var loop = function() {
 
@@ -549,7 +464,7 @@ Particle.prototype = (function(o) {
         for (i = 0, len = gravities.length; i < len; i++) {
             g = gravities[i];
             if (g.dragging) g.drag(mouse);
-            g.render();
+            g.render(context);
             if (g.destroyed) {
                 gravities.splice(i, 1);
                 len--;
@@ -573,28 +488,23 @@ Particle.prototype = (function(o) {
         for (i = 0; i < len; i++) {
             p = particles[i];
             p.update();
-
-            // Keep physical positions separate from the optical image.
-            // Both trail endpoints pass through the same combined lens field.
-            var visibleNow = distortPoint(p.x, p.y);
-            var visibleBefore = distortPoint(p._latest.x, p._latest.y);
-            bufferCtx.moveTo(visibleNow.x, visibleNow.y);
-            bufferCtx.lineTo(visibleBefore.x, visibleBefore.y);
+            bufferCtx.moveTo(p.x, p.y);
+            bufferCtx.lineTo(p._latest.x, p._latest.y);
         }
 
-        // Rounded line caps already render the particle endpoints as dots,
-        // so a second pass drawing circles over the same points is redundant.
         bufferCtx.stroke();
+        bufferCtx.beginPath();
+
+        for (i = 0; i < len; i++) {
+            p = particles[i];
+            bufferCtx.moveTo(p.x, p.y);
+            bufferCtx.arc(p.x, p.y, p.radius, 0, Math.PI * 2, false);
+        }
+
+        bufferCtx.fill();
         bufferCtx.restore();
 
         context.drawImage(bufferCvs, 0, 0);
-
-        // Draw the black holes last so their event horizons truly mask the particle
-        // trails instead of letting white streaks show through the black centre.
-        // Their accretion disks still sit above the trails, like foreground light.
-        for (i = 0, len = gravities.length; i < len; i++) {
-            gravities[i]._draw(context);
-        }
 
         requestAnimationFrame(loop);
     };
