@@ -456,7 +456,7 @@ Particle.prototype = (function(o) {
             '  );',
             '  gl_FragColor = vec4(color, 1.0);',
             '}'
-        ].join('\\n');
+        ].join('\n');
 
         function compileShader(type, source) {
             var shader = gl.createShader(type);
@@ -543,7 +543,8 @@ Particle.prototype = (function(o) {
                 if (g.destroyed) continue;
                 centers[count * 2] = g.x / screenWidth;
                 centers[count * 2 + 1] = g.y / screenHeight;
-                // Huffman's mass scale, following the gravity point as it grows.\n                masses[count] = 0.015 * (g.currentRadius / 10);
+                // Huffman's mass scale, following the gravity point as it grows.
+                masses[count] = 0.015 * (g.currentRadius / 10);
                 count++;
             }
 
