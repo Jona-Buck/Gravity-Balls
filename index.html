@@ -193,6 +193,8 @@ function GravityPoint(x, y, radius, targets) {
         gravities: targets.gravities || []
     };
     this._speed = new Vector();
+    // Each black hole begins at zero size and grows with the original ball radius animation.
+    this._lensMass = 0;
 }
 
 GravityPoint.RADIUS_LIMIT = 65;
@@ -372,7 +374,6 @@ Particle.prototype = (function(o) {
         backgroundReady = false,
         backgroundSide = 0,
         blackHoleMass = 1500,
-        currentBlackHoleMass = 0,
         blackHoleClicked = false,
         blackHoleClickedTime = 0;
 
@@ -547,10 +548,6 @@ Particle.prototype = (function(o) {
     function renderBlackHoles() {
         if (!backgroundReady || !backgroundGl || !backgroundProgram) return;
 
-        if (currentBlackHoleMass < blackHoleMass - 50) {
-            currentBlackHoleMass += (blackHoleMass - currentBlackHoleMass) * 0.03;
-        }
-
         if (blackHoleClicked) {
             blackHoleClickedTime += 0.03;
         } else if (blackHoleClickedTime > 0) {
@@ -571,7 +568,15 @@ Particle.prototype = (function(o) {
             var localY = g.y - offsetY;
             centers[count * 2] = localX / backgroundSide;
             centers[count * 2 + 1] = 1 - localY / backgroundSide;
-            masses[count] = currentBlackHoleMass * 0.00001;
+
+            // Mirror GravityPoint's original radius behavior:
+            // start at radius * 0.5, ease toward radius, and enlarge after mergers.
+            var targetLensMass = blackHoleMass * Math.max(0, g.currentRadius) / G_POINT_RADIUS;
+            g._lensMass += (targetLensMass - g._lensMass) * 0.03;
+            if (Math.abs(targetLensMass - g._lensMass) < 0.5) {
+                g._lensMass = targetLensMass;
+            }
+            masses[count] = g._lensMass * 0.00001;
             count++;
         }
 
