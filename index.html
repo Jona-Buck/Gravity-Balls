@@ -421,7 +421,7 @@ Particle.prototype = (function(o) {
             '  v_uv = a_position * 0.5 + 0.5;',
             '  gl_Position = vec4(a_position, 0.0, 1.0);',
             '}'
-        ].join('\\n');
+        ].join('\n');
 
         // A multi-lens version of the reference effect: each gravity point
         // distorts the same starfield texture using its own screen position.
@@ -449,7 +449,7 @@ Particle.prototype = (function(o) {
             '  vec3 imageColor = texture2D(u_image, clamp(samplePoint, vec2(0.001), vec2(0.999))).rgb;',
             '  gl_FragColor = vec4(max(imageColor - vec3(shade), vec3(0.0)), 1.0);',
             '}'
-        ].join('\\n');
+        ].join('\n');
 
         function makeShader(type, source) {
             var shader = backgroundGl.createShader(type);
