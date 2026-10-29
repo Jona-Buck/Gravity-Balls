@@ -48,7 +48,7 @@ function init(image) {
 	canvas.height = window.innerWidth >= window.innerHeight ? window.innerWidth : window.innerHeight;
 
 	// Scale only the visual lens so its dark core is about 10 canvas pixels in radius.
-	blackholeSizeScale = (4 * 10 * 10) / (canvas.width * canvas.width * blackholeMass * 0.00001);
+	blackholeSizeScale = (10 * 10) / (canvas.width * canvas.width * blackholeMass * 0.00001);
 
 	mouse = {x: originX/2, y: -(originY/2) + canvas.height, moved: false};
 	$(document).mousemove(function(e) {
@@ -206,7 +206,7 @@ window.addEventListener('resize', function(event){
 
 	canvas.width  = window.innerWidth >= window.innerHeight ? window.innerWidth : window.innerHeight;
 	canvas.height = window.innerWidth >= window.innerHeight ? window.innerWidth : window.innerHeight;
-	blackholeSizeScale = (4 * 10 * 10) / (canvas.width * canvas.width * blackholeMass * 0.00001);
+	blackholeSizeScale = (10 * 10) / (canvas.width * canvas.width * blackholeMass * 0.00001);
 	gl.viewport(0, 0, canvas.width, canvas.height);
 	locationOfResolution = gl.getUniformLocation(program, "u_resolution");
 });

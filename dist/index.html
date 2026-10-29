@@ -63,7 +63,12 @@ void main() {
 	);
 	
 
-     gl_FragColor = vec4(color,1.);
+     // The former Gravity Balls points had a 10 px radius.
+     if (dist * u_resolution.x < 10.0) {
+         gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+     } else {
+         gl_FragColor = vec4(color,1.);
+     }
 }
 // ]]></script>
 <script id="2d-vertex-shader" type="x-shader/x-vertex">// <![CDATA[
