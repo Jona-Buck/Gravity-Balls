@@ -19,7 +19,6 @@ var locationOfTime;
 var locationOfResolution;
 var locationOfMouse;
 var locationOfMass;
-var locationOfclickedTime;
 
 var originY = window.innerHeight,
     originX = window.innerWidth;
@@ -29,15 +28,6 @@ var mouse;
 var startTime = new Date().getTime(); // Get start time for animating
 var currentTime = 0;
 
-var clicked = false,
-    clickedTime = 0;
-
-$(document).mousedown(function(){
-	clicked = true;
-});
-$(document).mouseup(function(){
-	clicked = false;
-});
 
 function init(image) {
 	// standard canvas setup here, except get webgl context
@@ -102,7 +92,6 @@ function init(image) {
 	locationOfMouse = gl.getUniformLocation(program, "u_mouse");
 	locationOfMass = gl.getUniformLocation(program, "u_mass");
 	locationOfTime = gl.getUniformLocation(program, "u_time");
-	locationOfclickedTime = gl.getUniformLocation(program, "u_clickedTime");
 
 	/*
 
@@ -121,7 +110,6 @@ function init(image) {
 	gl.uniform2f(locationOfMouse, mouse.x, mouse.y);
 	gl.uniform1f(locationOfMass, curblackholeMass*0.00001);
 	gl.uniform1f(locationOfTime, currentTime);
-	gl.uniform1f(locationOfclickedTime, clickedTime);
 
 
 	var texCoordLocation = gl.getAttribLocation(program, "a_texCoord");
@@ -164,12 +152,6 @@ function render() {
 		curblackholeMass += (blackholeMass-curblackholeMass) * 0.03;
 	}
 
-	if(clicked){
-		clickedTime += 0.03;
-	} else if(clickedTime > 0 && clicked == false) {
-		clickedTime += -(clickedTime*0.015);
-	}
-
 	if(mouse.moved == false){
 		mouse.y = (-(originY/2) + Math.sin(currentTime * 0.7) * ((originY * 0.25))) + canvas.height;
 		mouse.x = (originX/2) + Math.sin(currentTime * 0.6) * -(originX * 0.35);
@@ -178,7 +160,6 @@ function render() {
 	gl.uniform1f(locationOfMass, curblackholeMass*0.00001);
 	gl.uniform2f(locationOfMouse, mouse.x, mouse.y);
 	gl.uniform1f(locationOfTime, currentTime); // update the time uniform in our shader
-	gl.uniform1f(locationOfclickedTime, clickedTime);
 
 	window.requestAnimationFrame(render, canvas); // request the next frame
 
