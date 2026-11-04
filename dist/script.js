@@ -4,9 +4,7 @@ var BASE_RADIUS = 10;
 var BASE_GRAVITY = 0.05;
 var LENS_MASS = 10;
 var MERGE_FACTOR = 0.85;
-var EXPLOSION_RADIUS_LIMIT = 65;
-var FRAGMENT_COUNT = 8;
-var EXPLOSION_COOLDOWN = 1200;
+var EXPLOSION_BODY_COUNT = 32;
 
 var blackholes = [];
 var explosions = [];
@@ -26,9 +24,6 @@ function makeBlackHole(x, y, options) {
 		gravity: options.gravity !== undefined ? options.gravity : BASE_GRAVITY,
 		mass: options.mass !== undefined ? options.mass : 0,
 		bodyCount: options.bodyCount !== undefined ? options.bodyCount : 1,
-		vx: options.vx || 0, vy: options.vy || 0,
-		burstFrames: options.burstFrames || 0,
-		mergeCooldownUntil: options.mergeCooldownUntil || 0
 	};
 }
 
@@ -147,95 +142,147 @@ function resizeCanvas() {
 	}
 }
 
-function spawnExplosionEffect(x, y, radius, now) {
+function spawnExplosionEffect(x, y, radius, now, bodyCount) {
 	var rect = canvas.getBoundingClientRect();
 	var sx = rect.left + x / canvas.width * rect.width;
 	var sy = rect.top + y / canvas.height * rect.height;
-	var sparks = [];
-	for (var i = 0; i < 42; i++) {
-		var angle = Math.PI * 2 * i / 42 + (Math.random() - 0.5) * 0.16;
-		var speed = 1.5 + Math.random() * 5.5;
-		sparks.push({ x: sx, y: sy, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
-			life: 0.7 + Math.random() * 0.3, size: 1 + Math.random() * 2.5 });
+	var particles = [];
+	var particleCount = Math.min(220, 90 + bodyCount * 2);
+
+	for (var i = 0; i < particleCount; i++) {
+		var angle = Math.random() * Math.PI * 2;
+		var speed = 110 + Math.random() * 520;
+		var size = 0.8 + Math.random() * 2.8;
+		particles.push({
+			x: sx, y: sy,
+			vx: Math.cos(angle) * speed,
+			vy: Math.sin(angle) * speed,
+			age: 0,
+			life: 0.45 + Math.random() * 0.7,
+			size: size,
+			stretch: 0.025 + Math.random() * 0.035,
+			tint: Math.random()
+		});
 	}
-	explosions.push({ x: sx, y: sy, start: now, duration: 1150,
-		maxRadius: Math.max(100, radius * 5), sparks: sparks });
+
+	explosions.push({
+		x: sx,
+		y: sy,
+		start: now,
+		lastFrame: now,
+		duration: 1250,
+		maxRadius: Math.max(150, radius * 7),
+		particles: particles
+	});
 }
 
 function drawExplosionEffects(now) {
 	if (!fxContext) return;
+
 	fxContext.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
+
 	for (var i = explosions.length - 1; i >= 0; i--) {
 		var effect = explosions[i];
 		var progress = (now - effect.start) / effect.duration;
+
 		if (progress >= 1) {
 			explosions.splice(i, 1);
 			continue;
 		}
-		var alpha = Math.pow(1 - progress, 1.65);
-		var ringRadius = effect.maxRadius * (0.12 + progress * 1.45);
+
+		var dt = Math.min(0.04, Math.max(0, (now - effect.lastFrame) / 1000));
+		effect.lastFrame = now;
+
+		// One broad, soft shockwave instead of thin concentric outlines.
+		var waveProgress = 1 - Math.pow(1 - progress, 2.4);
+		var waveRadius = effect.maxRadius * waveProgress;
+		var waveWidth = 34 * (1 - progress) + 5;
+		var waveAlpha = Math.sin(Math.PI * Math.pow(progress, 0.72)) * 0.72;
+
 		fxContext.save();
-		fxContext.globalAlpha = alpha;
-		fxContext.lineWidth = 5 * (1 - progress) + 1;
-		fxContext.strokeStyle = 'rgba(145,220,255,0.95)';
-		fxContext.shadowColor = 'rgba(100,190,255,0.9)';
-		fxContext.shadowBlur = 24 * (1 - progress);
+		fxContext.globalCompositeOperation = 'lighter';
+
+		var wave = fxContext.createRadialGradient(
+			effect.x, effect.y, Math.max(0, waveRadius - waveWidth),
+			effect.x, effect.y, waveRadius + waveWidth
+		);
+		wave.addColorStop(0, 'rgba(80, 170, 255, 0)');
+		wave.addColorStop(0.42, 'rgba(95, 190, 255, ' + (waveAlpha * 0.12) + ')');
+		wave.addColorStop(0.72, 'rgba(185, 230, 255, ' + (waveAlpha * 0.8) + ')');
+		wave.addColorStop(0.88, 'rgba(255, 255, 255, ' + (waveAlpha * 0.95) + ')');
+		wave.addColorStop(1, 'rgba(85, 165, 255, 0)');
+		fxContext.fillStyle = wave;
 		fxContext.beginPath();
-		fxContext.arc(effect.x, effect.y, ringRadius, 0, Math.PI * 2);
-		fxContext.stroke();
-		fxContext.globalAlpha = alpha * 0.55;
-		fxContext.lineWidth = 2;
+		fxContext.arc(effect.x, effect.y, waveRadius + waveWidth, 0, Math.PI * 2);
+		fxContext.fill();
+
+		// Short central flash, brightest at the instant of collapse.
+		var flashAlpha = Math.pow(1 - progress, 8);
+		var flashRadius = effect.maxRadius * (0.07 + progress * 0.1);
+		var flash = fxContext.createRadialGradient(
+			effect.x, effect.y, 0,
+			effect.x, effect.y, flashRadius
+		);
+		flash.addColorStop(0, 'rgba(255, 255, 255, ' + flashAlpha + ')');
+		flash.addColorStop(0.18, 'rgba(220, 245, 255, ' + (flashAlpha * 0.92) + ')');
+		flash.addColorStop(0.52, 'rgba(95, 190, 255, ' + (flashAlpha * 0.4) + ')');
+		flash.addColorStop(1, 'rgba(70, 140, 255, 0)');
+		fxContext.fillStyle = flash;
 		fxContext.beginPath();
-		fxContext.arc(effect.x, effect.y, ringRadius * 0.72, 0, Math.PI * 2);
-		fxContext.stroke();
+		fxContext.arc(effect.x, effect.y, flashRadius, 0, Math.PI * 2);
+		fxContext.fill();
 		fxContext.restore();
 
-		for (var j = 0; j < effect.sparks.length; j++) {
-			var spark = effect.sparks[j];
-			if (spark.life <= 0) continue;
-			spark.x += spark.vx;
-			spark.y += spark.vy;
-			spark.vx *= 0.975;
-			spark.vy *= 0.975;
-			spark.life -= 0.018;
+		// Fast luminous debris with short trails and natural drag.
+		for (var j = 0; j < effect.particles.length; j++) {
+			var particle = effect.particles[j];
+			if (particle.age >= particle.life) continue;
+
+			var previousX = particle.x;
+			var previousY = particle.y;
+			particle.x += particle.vx * dt;
+			particle.y += particle.vy * dt;
+			var drag = Math.exp(-1.7 * dt);
+			particle.vx *= drag;
+			particle.vy *= drag;
+			particle.age += dt;
+
+			var lifeProgress = particle.age / particle.life;
+			var particleAlpha = Math.pow(1 - lifeProgress, 1.5);
+			var blueTint = particle.tint > 0.22;
+
 			fxContext.save();
-			fxContext.globalAlpha = Math.max(0, spark.life) * alpha;
-			fxContext.fillStyle = '#b9eaff';
-			fxContext.shadowColor = '#69caff';
-			fxContext.shadowBlur = 12;
+			fxContext.globalCompositeOperation = 'lighter';
+			fxContext.globalAlpha = particleAlpha;
+			fxContext.lineCap = 'round';
+			fxContext.lineWidth = particle.size * (0.7 + particleAlpha);
+			fxContext.strokeStyle = blueTint ? 'rgba(125, 205, 255, 0.9)' : 'rgba(255, 245, 225, 0.95)';
+			fxContext.shadowColor = blueTint ? '#68bfff' : '#fff0d2';
+			fxContext.shadowBlur = 8 * particleAlpha;
 			fxContext.beginPath();
-			fxContext.arc(spark.x, spark.y, spark.size, 0, Math.PI * 2);
-			fxContext.fill();
+			fxContext.moveTo(previousX, previousY);
+			fxContext.lineTo(
+				particle.x - particle.vx * particle.stretch,
+				particle.y - particle.vy * particle.stretch
+			);
+			fxContext.stroke();
 			fxContext.restore();
 		}
 	}
 }
 
 function explodeBlackHole(index, now) {
-	var parent = blackholes[index];
-	var count = FRAGMENT_COUNT;
-	var fragmentRadius = parent.radius / Math.sqrt(count);
-	var startAngle = Math.random() * Math.PI * 2;
-	var offsetRadius = Math.max(parent.radius * 1.08, 48);
-	var fragments = [];
-	spawnExplosionEffect(parent.x, parent.y, parent.radius, now);
+	var collapsed = blackholes[index];
 
-	for (var i = 0; i < count; i++) {
-		var angle = startAngle + Math.PI * 2 * i / count;
-		var dx = Math.cos(angle), dy = Math.sin(angle);
-		fragments.push(makeBlackHole(parent.x + dx * offsetRadius, parent.y + dy * offsetRadius, {
-			radius: fragmentRadius,
-			currentRadius: fragmentRadius * 0.55,
-			gravity: parent.gravity / count,
-			mass: parent.mass / count,
-			bodyCount: parent.bodyCount / count,
-			vx: dx * 5.2 + parent.vx / count,
-			vy: dy * 5.2 + parent.vy / count,
-			burstFrames: 90,
-			mergeCooldownUntil: now + EXPLOSION_COOLDOWN
-		}));
-	}
-	blackholes.splice.apply(blackholes, [index, 1].concat(fragments));
+	// The whole merged object vanishes. No replacement black holes are spawned.
+	spawnExplosionEffect(
+		collapsed.x,
+		collapsed.y,
+		collapsed.currentRadius,
+		now,
+		collapsed.bodyCount
+	);
+	blackholes.splice(index, 1);
 }
 
 function mergeBlackHoles(indexA, indexB) {
@@ -251,8 +298,6 @@ function mergeBlackHoles(indexA, indexB) {
 	var totalMass = massA + massB;
 	a.x = (a.x * massA + b.x * massB) / totalMass;
 	a.y = (a.y * massA + b.y * massB) / totalMass;
-	a.vx = (a.vx * massA + b.vx * massB) / totalMass;
-	a.vy = (a.vy * massA + b.vy * massB) / totalMass;
 
 	var areaA = a.radius * a.radius;
 	var areaB = b.radius * b.radius;
@@ -262,8 +307,6 @@ function mergeBlackHoles(indexA, indexB) {
 	a.radius = Math.sqrt(areaA + areaB);
 	a.currentRadius = Math.sqrt(areaA + areaB * 3);
 	a.radiusEase = 0;
-	a.burstFrames = Math.max(a.burstFrames, b.burstFrames);
-	a.mergeCooldownUntil = Math.max(a.mergeCooldownUntil, b.mergeCooldownUntil);
 	blackholes.splice(indexB, 1);
 }
 
@@ -274,10 +317,8 @@ function resolveMergers(now) {
 		mergeSearch:
 		for (var i = 0; i < blackholes.length; i++) {
 			var a = blackholes[i];
-			if (a.mergeCooldownUntil > now) continue;
 			for (var j = i + 1; j < blackholes.length; j++) {
 				var b = blackholes[j];
-				if (b.mergeCooldownUntil > now) continue;
 				var dx = b.x - a.x, dy = b.y - a.y;
 				var distance = Math.sqrt(dx * dx + dy * dy);
 				var mergeReach = 0;
@@ -287,7 +328,7 @@ function resolveMergers(now) {
 				if (touching) {
 					mergeBlackHoles(i, j);
 					changed = true;
-					if (blackholes[i].currentRadius > EXPLOSION_RADIUS_LIMIT) explodeBlackHole(i, now);
+					if (blackholes[i].bodyCount >= EXPLOSION_BODY_COUNT) explodeBlackHole(i, now);
 					break mergeSearch;
 				}
 			}
@@ -305,15 +346,6 @@ function updatePhysics(now) {
 		var targetMass = LENS_MASS * hole.bodyCount;
 		if (hole.mass < targetMass * 0.999) hole.mass += (targetMass - hole.mass) * 0.03;
 
-		// Only explosion fragments have extra inertial motion; normal attraction matches the reference.
-		if (hole.burstFrames > 0) {
-			hole.x += hole.vx;
-			hole.y += hole.vy;
-			hole.vx *= 0.965;
-			hole.vy *= 0.965;
-			hole.burstFrames--;
-			if (hole.burstFrames === 0) hole.vx = hole.vy = 0;
-		}
 	}
 
 	resolveMergers(now);
