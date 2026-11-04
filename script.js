@@ -280,9 +280,11 @@ function resolveMergers(now) {
 				if (b.mergeCooldownUntil > now) continue;
 				var dx = b.x - a.x, dy = b.y - a.y;
 				var distance = Math.sqrt(dx * dx + dy * dy);
-				var mature = a.currentRadius >= b.radius || b.currentRadius >= a.radius;
-				var touching = distance < (a.currentRadius + b.currentRadius) * MERGE_FACTOR;
-				if (mature && touching) {
+				var mergeReach = 0;
+				if (a.currentRadius >= b.radius) mergeReach = Math.max(mergeReach, a.currentRadius + b.radius);
+				if (b.currentRadius >= a.radius) mergeReach = Math.max(mergeReach, b.currentRadius + a.radius);
+				var touching = mergeReach > 0 && distance < mergeReach * MERGE_FACTOR;
+				if (touching) {
 					mergeBlackHoles(i, j);
 					changed = true;
 					if (blackholes[i].currentRadius > EXPLOSION_RADIUS_LIMIT) explodeBlackHole(i, now);
