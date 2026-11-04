@@ -123,10 +123,23 @@ function ensureRenderTargets() {
 
 function resizeCanvas() {
 	if (!canvas || !gl) return;
+	var oldWidth = canvas.width || 1;
+	var oldHeight = canvas.height || 1;
 	var side = Math.max(window.innerWidth, window.innerHeight);
+	var scaleX = side / oldWidth;
+	var scaleY = side / oldHeight;
+
+	for (var i = 0; i < blackholes.length; i++) {
+		blackholes[i].x *= scaleX;
+		blackholes[i].y *= scaleY;
+	}
+
 	canvas.width = side;
 	canvas.height = side;
 	gl.viewport(0, 0, canvas.width, canvas.height);
+	if (locationOfResolution) {
+		gl.uniform2f(locationOfResolution, canvas.width, canvas.height);
+	}
 	deleteRenderTargets();
 	if (fxCanvas) {
 		fxCanvas.width = window.innerWidth;
@@ -352,6 +365,7 @@ function drawPass(sourceTexture, targetFramebuffer, hole) {
 
 function renderBlackHoles() {
 	gl.useProgram(program);
+	if (blackholes.length <= 1 && renderTargets.length) deleteRenderTargets();
 	if (blackholes.length === 0) {
 		drawPass(backgroundTexture, null, null);
 		return;
