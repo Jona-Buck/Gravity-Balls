@@ -3,7 +3,9 @@
 var bgUrl = 'https://images.unsplash.com/photo-1462331940025-496dfbfc7564?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=crop&w=1427&q=80'
 
 var blackholeMass = 10;
-var curblackholeMass = 0;
+var MAX_BLACKHOLES = 8;
+var blackholes = [];
+var blackholeUniforms = new Float32Array(MAX_BLACKHOLES * 3);
 
 var canvas, gl; // canvas and webgl context
 
@@ -17,17 +19,31 @@ var buffer;
 /* Variables holding the location of uniform variables in the WebGL. We use this to send info to the WebGL script. */
 var locationOfTime;
 var locationOfResolution;
-var locationOfMouse;
-var locationOfMass;
-
-var originY = window.innerHeight,
-    originX = window.innerWidth;
-
-var mouse;
+var locationOfBlackholes;
 
 var startTime = new Date().getTime(); // Get start time for animating
 var currentTime = 0;
 
+
+
+function addBlackHole(event) {
+	var rect = canvas.getBoundingClientRect();
+	var x = (event.clientX - rect.left) / rect.width;
+	var y = (event.clientY - rect.top) / rect.height;
+
+	// Ignore clicks outside the visible canvas area.
+	if (x < 0 || x > 1 || y < 0 || y > 1) {
+		return;
+	}
+
+	// WebGL 1 guarantees a limited number of fragment uniforms.
+	// Reuse the oldest slot after eight black holes so every click still works.
+	if (blackholes.length >= MAX_BLACKHOLES) {
+		blackholes.shift();
+	}
+
+	blackholes.push({ x: x, y: y, mass: 0 });
+}
 
 function init(image) {
 	// standard canvas setup here, except get webgl context
@@ -38,12 +54,7 @@ function init(image) {
 
 
 
-	mouse = {x: originX/2, y: -(originY/2) + canvas.height, moved: false};
-	$(document).mousemove(function(e) {
-		mouse.x = e.pageX;
-		mouse.y = -e.pageY + canvas.height;
-		mouse.moved = true;
-	});
+	canvas.addEventListener('click', addBlackHole);
 
 	// give WebGL it's viewport
 	gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
@@ -90,8 +101,7 @@ function init(image) {
 
 	*/
 	locationOfResolution = gl.getUniformLocation(program, "u_resolution");
-	locationOfMouse = gl.getUniformLocation(program, "u_mouse");
-	locationOfMass = gl.getUniformLocation(program, "u_mass");
+	locationOfBlackholes = gl.getUniformLocation(program, "u_blackholes[0]");
 	locationOfTime = gl.getUniformLocation(program, "u_time");
 
 	/*
@@ -108,8 +118,7 @@ function init(image) {
 
 	*/
 	gl.uniform2f(locationOfResolution, canvas.width, canvas.height);
-	gl.uniform2f(locationOfMouse, mouse.x, mouse.y);
-	gl.uniform1f(locationOfMass, curblackholeMass*0.00001);
+	gl.uniform3fv(locationOfBlackholes, blackholeUniforms);
 	gl.uniform1f(locationOfTime, currentTime);
 
 
@@ -149,17 +158,27 @@ function render() {
 	var now = new Date().getTime();
 	currentTime = (now - startTime) / 1000; // update the current time for animations
 
-	if(curblackholeMass < blackholeMass * 0.999){
-		curblackholeMass += (blackholeMass-curblackholeMass) * 0.03;
+	for (var i = 0; i < MAX_BLACKHOLES; i++) {
+		var blackhole = blackholes[i];
+		var offset = i * 3;
+
+		if (blackhole) {
+			// Preserve the original mass ramp, independently for every new black hole.
+			if (blackhole.mass < blackholeMass * 0.999) {
+				blackhole.mass += (blackholeMass - blackhole.mass) * 0.03;
+			}
+
+			blackholeUniforms[offset] = blackhole.x;
+			blackholeUniforms[offset + 1] = blackhole.y;
+			blackholeUniforms[offset + 2] = blackhole.mass * 0.00001;
+		} else {
+			blackholeUniforms[offset] = 0;
+			blackholeUniforms[offset + 1] = 0;
+			blackholeUniforms[offset + 2] = 0;
+		}
 	}
 
-	if(mouse.moved == false){
-		mouse.y = (-(originY/2) + Math.sin(currentTime * 0.7) * ((originY * 0.25))) + canvas.height;
-		mouse.x = (originX/2) + Math.sin(currentTime * 0.6) * -(originX * 0.35);
-	}
-
-	gl.uniform1f(locationOfMass, curblackholeMass*0.00001);
-	gl.uniform2f(locationOfMouse, mouse.x, mouse.y);
+	gl.uniform3fv(locationOfBlackholes, blackholeUniforms);
 	gl.uniform1f(locationOfTime, currentTime); // update the time uniform in our shader
 
 	window.requestAnimationFrame(render, canvas); // request the next frame
