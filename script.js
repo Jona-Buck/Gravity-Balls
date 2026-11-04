@@ -1,210 +1,430 @@
-// set up global javascript variables
+var bgUrl = 'https://images.unsplash.com/photo-1462331940025-496dfbfc7564?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=crop&w=1427&q=80';
 
-var bgUrl = 'https://images.unsplash.com/photo-1462331940025-496dfbfc7564?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=crop&w=1427&q=80'
+var BASE_RADIUS = 10;
+var BASE_GRAVITY = 0.05;
+var LENS_MASS = 10;
+var MERGE_FACTOR = 0.85;
+var EXPLOSION_RADIUS_LIMIT = 65;
+var FRAGMENT_COUNT = 8;
+var EXPLOSION_COOLDOWN = 1200;
 
-var blackholeMass = 10;
-var MAX_BLACKHOLES = 8;
 var blackholes = [];
-var blackholeUniforms = new Float32Array(MAX_BLACKHOLES * 3);
+var explosions = [];
+var canvas, gl, fxCanvas, fxContext, program, quadBuffer, backgroundTexture;
+var renderTargets = [];
+var targetWidth = 0, targetHeight = 0;
+var locationOfResolution, locationOfCenter, locationOfMass, locationOfImage;
+var startTime = Date.now();
 
-var canvas, gl; // canvas and webgl context
-
-var shaderScript;
-var shaderSource;
-var vertexShader; // Vertex shader.  Not much happens in that shader, it just creates the vertex's to be drawn on
-var fragmentShader; // this shader is where the magic happens. Fragment = pixel.  Vertex = kind of like "faces" on a 3d model.  
-var buffer;
-
-
-/* Variables holding the location of uniform variables in the WebGL. We use this to send info to the WebGL script. */
-var locationOfTime;
-var locationOfResolution;
-var locationOfBlackholes;
-
-var startTime = new Date().getTime(); // Get start time for animating
-var currentTime = 0;
-
-
+function makeBlackHole(x, y, options) {
+	options = options || {};
+	return {
+		x: x, y: y,
+		radius: options.radius || BASE_RADIUS,
+		currentRadius: options.currentRadius !== undefined ? options.currentRadius : BASE_RADIUS * 0.5,
+		radiusEase: 0,
+		gravity: options.gravity !== undefined ? options.gravity : BASE_GRAVITY,
+		mass: options.mass !== undefined ? options.mass : 0,
+		bodyCount: options.bodyCount !== undefined ? options.bodyCount : 1,
+		vx: options.vx || 0, vy: options.vy || 0,
+		burstFrames: options.burstFrames || 0,
+		mergeCooldownUntil: options.mergeCooldownUntil || 0
+	};
+}
 
 function addBlackHole(event) {
 	var rect = canvas.getBoundingClientRect();
-	var x = (event.clientX - rect.left) / rect.width;
-	var y = (event.clientY - rect.top) / rect.height;
-
-	// Ignore clicks outside the visible canvas area.
-	if (x < 0 || x > 1 || y < 0 || y > 1) {
-		return;
+	if (!rect.width || !rect.height) return;
+	var x = (event.clientX - rect.left) / rect.width * canvas.width;
+	var y = (event.clientY - rect.top) / rect.height * canvas.height;
+	if (x >= 0 && x <= canvas.width && y >= 0 && y <= canvas.height) {
+		blackholes.push(makeBlackHole(x, y));
 	}
-
-	// WebGL 1 guarantees a limited number of fragment uniforms.
-	// Reuse the oldest slot after eight black holes so every click still works.
-	if (blackholes.length >= MAX_BLACKHOLES) {
-		blackholes.shift();
-	}
-
-	blackholes.push({ x: x, y: y, mass: 0 });
 }
 
-function init(image) {
-	// standard canvas setup here, except get webgl context
-	canvas = document.getElementById('glscreen');
-	gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-	canvas.width  = window.innerWidth >= window.innerHeight ? window.innerWidth : window.innerHeight;
-	canvas.height = window.innerWidth >= window.innerHeight ? window.innerWidth : window.innerHeight;
+function compileShader(type, source) {
+	var shader = gl.createShader(type);
+	gl.shaderSource(shader, source);
+	gl.compileShader(shader);
+	if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+		var message = gl.getShaderInfoLog(shader) || 'Shader compile error';
+		gl.deleteShader(shader);
+		throw new Error(message);
+	}
+	return shader;
+}
 
+function createProgram() {
+	var vertexShader = compileShader(gl.VERTEX_SHADER, document.getElementById('2d-vertex-shader').text);
+	var fragmentShader = compileShader(gl.FRAGMENT_SHADER, document.getElementById('2d-fragment-shader').text);
+	var result = gl.createProgram();
+	gl.attachShader(result, vertexShader);
+	gl.attachShader(result, fragmentShader);
+	gl.linkProgram(result);
+	gl.deleteShader(vertexShader);
+	gl.deleteShader(fragmentShader);
+	if (!gl.getProgramParameter(result, gl.LINK_STATUS)) {
+		var message = gl.getProgramInfoLog(result) || 'Program link error';
+		gl.deleteProgram(result);
+		throw new Error(message);
+	}
+	return result;
+}
 
-
-	canvas.addEventListener('click', addBlackHole);
-
-	// give WebGL it's viewport
-	gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-
-	// kind of back-end stuff
-	buffer = gl.createBuffer();
-	gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-	gl.bufferData(
-		gl.ARRAY_BUFFER, 
-		new Float32Array([
-			-1.0, -1.0, 
-			1.0, -1.0, 
-			-1.0,  1.0, 
-			-1.0,  1.0, 
-			1.0, -1.0, 
-			1.0,  1.0]), 
-		gl.STATIC_DRAW
-	); // ^^ That up there sets up the vertex's used to draw onto. I think at least, I haven't payed much attention to vertex's yet, for all I know I'm wrong.
-
-	shaderScript = document.getElementById("2d-vertex-shader");
-	shaderSource = shaderScript.text;
-	vertexShader = gl.createShader(gl.VERTEX_SHADER); //create the vertex shader from script
-	gl.shaderSource(vertexShader, shaderSource);
-	gl.compileShader(vertexShader);
-
-	shaderScript   = document.getElementById("2d-fragment-shader");
-	shaderSource   = shaderScript.text;
-	fragmentShader = gl.createShader(gl.FRAGMENT_SHADER); //create the fragment from script
-	gl.shaderSource(fragmentShader, shaderSource);
-	gl.compileShader(fragmentShader);
-
-	program = gl.createProgram(); // create the WebGL program.  This variable will be used to inject our javascript variables into the program.
-	gl.attachShader(program, vertexShader); // add the shaders to the program
-	gl.attachShader(program, fragmentShader); // ^^
-	gl.linkProgram(program);	 // Tell our WebGL application to use the program
-	gl.useProgram(program); // ^^ yep, but now literally use it.
-
-
-	/* 
-
-	Alright, so here we're attatching javascript variables to the WebGL code.  First we get the location of the uniform variable inside the program. 
-
-	We use the gl.getUniformLocation function to do this, and pass thru the program variable we created above, as well as the name of the uniform variable in our shader.
-
-	*/
-	locationOfResolution = gl.getUniformLocation(program, "u_resolution");
-	locationOfBlackholes = gl.getUniformLocation(program, "u_blackholes[0]");
-	locationOfTime = gl.getUniformLocation(program, "u_time");
-
-	/*
-
-	Then we simply apply our javascript variables to the program. 
-	Notice, it gets a bit tricky doing this.  If you're editing a float value, gl.uniformf works. 
-
-	But if we want to send over an array of floats, for example, we'd use gl.uniform2f.  We're specifying that we are sending 2 floats at the end.  
-
-	You can also send it over to the program as a vector, by using gl.uniform2fv.
-	To read up on all of the different gl.uniform** stuff, to send any variable you want, I'd recommend using the table (found on this site, but you need to scroll down about 300px) 
-
-	https://webglfundamentals.org/webgl/lessons/webgl-shaders-and-glsl.html#uniforms
-
-	*/
-	gl.uniform2f(locationOfResolution, canvas.width, canvas.height);
-	gl.uniform3fv(locationOfBlackholes, blackholeUniforms);
-	gl.uniform1f(locationOfTime, currentTime);
-
-
-	var texCoordLocation = gl.getAttribLocation(program, "a_texCoord");
-
-	// provide texture coordinates for the rectangle.
-	var texCoordBuffer = gl.createBuffer();
-	gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
-	gl.bufferData(gl.ARRAY_BUFFER, 		new Float32Array([
-		-1.0, -1.0, 
-		1.0, -1.0, 
-		-1.0,  1.0, 
-		-1.0,  1.0, 
-		1.0, -1.0, 
-		1.0,  1.0]), 
-			    gl.STATIC_DRAW);
-	gl.enableVertexAttribArray(texCoordLocation);
-	gl.vertexAttribPointer(texCoordLocation, 2, gl.FLOAT, false, 0, 0);
-
-	// Create a texture.
-	var texture = gl.createTexture();
-	gl.bindTexture(gl.TEXTURE_2D, texture);
-
-	// Set the parameters so we can render any size image.
+function createBackgroundTexture(image) {
+	backgroundTexture = gl.createTexture();
+	gl.activeTexture(gl.TEXTURE0);
+	gl.bindTexture(gl.TEXTURE_2D, backgroundTexture);
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-
-	// Upload the image into the texture.
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-
-	render();
 }
 
-function render() {
-	var now = new Date().getTime();
-	currentTime = (now - startTime) / 1000; // update the current time for animations
+function deleteRenderTargets() {
+	for (var i = 0; i < renderTargets.length; i++) {
+		gl.deleteTexture(renderTargets[i].texture);
+		gl.deleteFramebuffer(renderTargets[i].framebuffer);
+	}
+	renderTargets = [];
+	targetWidth = targetHeight = 0;
+}
 
-	for (var i = 0; i < MAX_BLACKHOLES; i++) {
-		var blackhole = blackholes[i];
-		var offset = i * 3;
+function createRenderTarget() {
+	var texture = gl.createTexture();
+	gl.bindTexture(gl.TEXTURE_2D, texture);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvas.width, canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
 
-		if (blackhole) {
-			// Preserve the original mass ramp, independently for every new black hole.
-			if (blackhole.mass < blackholeMass * 0.999) {
-				blackhole.mass += (blackholeMass - blackhole.mass) * 0.03;
+	var framebuffer = gl.createFramebuffer();
+	gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+	gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+	var status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+	gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+	if (status !== gl.FRAMEBUFFER_COMPLETE) {
+		gl.deleteTexture(texture);
+		gl.deleteFramebuffer(framebuffer);
+		throw new Error('Framebuffer incomplete: ' + status);
+	}
+	return { texture: texture, framebuffer: framebuffer };
+}
+
+function ensureRenderTargets() {
+	if (renderTargets.length === 2 && targetWidth === canvas.width && targetHeight === canvas.height) return;
+	deleteRenderTargets();
+	renderTargets.push(createRenderTarget(), createRenderTarget());
+	targetWidth = canvas.width;
+	targetHeight = canvas.height;
+}
+
+function resizeCanvas() {
+	if (!canvas || !gl) return;
+	var side = Math.max(window.innerWidth, window.innerHeight);
+	canvas.width = side;
+	canvas.height = side;
+	gl.viewport(0, 0, canvas.width, canvas.height);
+	deleteRenderTargets();
+	if (fxCanvas) {
+		fxCanvas.width = window.innerWidth;
+		fxCanvas.height = window.innerHeight;
+	}
+}
+
+function spawnExplosionEffect(x, y, radius, now) {
+	var rect = canvas.getBoundingClientRect();
+	var sx = rect.left + x / canvas.width * rect.width;
+	var sy = rect.top + y / canvas.height * rect.height;
+	var sparks = [];
+	for (var i = 0; i < 42; i++) {
+		var angle = Math.PI * 2 * i / 42 + (Math.random() - 0.5) * 0.16;
+		var speed = 1.5 + Math.random() * 5.5;
+		sparks.push({ x: sx, y: sy, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+			life: 0.7 + Math.random() * 0.3, size: 1 + Math.random() * 2.5 });
+	}
+	explosions.push({ x: sx, y: sy, start: now, duration: 1150,
+		maxRadius: Math.max(100, radius * 5), sparks: sparks });
+}
+
+function drawExplosionEffects(now) {
+	if (!fxContext) return;
+	fxContext.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
+	for (var i = explosions.length - 1; i >= 0; i--) {
+		var effect = explosions[i];
+		var progress = (now - effect.start) / effect.duration;
+		if (progress >= 1) {
+			explosions.splice(i, 1);
+			continue;
+		}
+		var alpha = Math.pow(1 - progress, 1.65);
+		var ringRadius = effect.maxRadius * (0.12 + progress * 1.45);
+		fxContext.save();
+		fxContext.globalAlpha = alpha;
+		fxContext.lineWidth = 5 * (1 - progress) + 1;
+		fxContext.strokeStyle = 'rgba(145,220,255,0.95)';
+		fxContext.shadowColor = 'rgba(100,190,255,0.9)';
+		fxContext.shadowBlur = 24 * (1 - progress);
+		fxContext.beginPath();
+		fxContext.arc(effect.x, effect.y, ringRadius, 0, Math.PI * 2);
+		fxContext.stroke();
+		fxContext.globalAlpha = alpha * 0.55;
+		fxContext.lineWidth = 2;
+		fxContext.beginPath();
+		fxContext.arc(effect.x, effect.y, ringRadius * 0.72, 0, Math.PI * 2);
+		fxContext.stroke();
+		fxContext.restore();
+
+		for (var j = 0; j < effect.sparks.length; j++) {
+			var spark = effect.sparks[j];
+			if (spark.life <= 0) continue;
+			spark.x += spark.vx;
+			spark.y += spark.vy;
+			spark.vx *= 0.975;
+			spark.vy *= 0.975;
+			spark.life -= 0.018;
+			fxContext.save();
+			fxContext.globalAlpha = Math.max(0, spark.life) * alpha;
+			fxContext.fillStyle = '#b9eaff';
+			fxContext.shadowColor = '#69caff';
+			fxContext.shadowBlur = 12;
+			fxContext.beginPath();
+			fxContext.arc(spark.x, spark.y, spark.size, 0, Math.PI * 2);
+			fxContext.fill();
+			fxContext.restore();
+		}
+	}
+}
+
+function explodeBlackHole(index, now) {
+	var parent = blackholes[index];
+	var count = FRAGMENT_COUNT;
+	var fragmentRadius = parent.radius / Math.sqrt(count);
+	var startAngle = Math.random() * Math.PI * 2;
+	var offsetRadius = Math.max(parent.radius * 1.08, 48);
+	var fragments = [];
+	spawnExplosionEffect(parent.x, parent.y, parent.radius, now);
+
+	for (var i = 0; i < count; i++) {
+		var angle = startAngle + Math.PI * 2 * i / count;
+		var dx = Math.cos(angle), dy = Math.sin(angle);
+		fragments.push(makeBlackHole(parent.x + dx * offsetRadius, parent.y + dy * offsetRadius, {
+			radius: fragmentRadius,
+			currentRadius: fragmentRadius * 0.55,
+			gravity: parent.gravity / count,
+			mass: parent.mass / count,
+			bodyCount: parent.bodyCount / count,
+			vx: dx * 5.2 + parent.vx / count,
+			vy: dy * 5.2 + parent.vy / count,
+			burstFrames: 90,
+			mergeCooldownUntil: now + EXPLOSION_COOLDOWN
+		}));
+	}
+	blackholes.splice.apply(blackholes, [index, 1].concat(fragments));
+}
+
+function mergeBlackHoles(indexA, indexB) {
+	var a = blackholes[indexA], b = blackholes[indexB];
+	if (b.radius > a.radius) {
+		var swap = a; a = b; b = swap;
+		blackholes[indexA] = a;
+		blackholes[indexB] = b;
+	}
+
+	var massA = Math.max(a.gravity, 0.000001);
+	var massB = Math.max(b.gravity, 0.000001);
+	var totalMass = massA + massB;
+	a.x = (a.x * massA + b.x * massB) / totalMass;
+	a.y = (a.y * massA + b.y * massB) / totalMass;
+	a.vx = (a.vx * massA + b.vx * massB) / totalMass;
+	a.vy = (a.vy * massA + b.vy * massB) / totalMass;
+
+	var areaA = a.radius * a.radius;
+	var areaB = b.radius * b.radius;
+	a.gravity += b.gravity;
+	a.mass += b.mass;
+	a.bodyCount += b.bodyCount;
+	a.radius = Math.sqrt(areaA + areaB);
+	a.currentRadius = Math.sqrt(areaA + areaB * 3);
+	a.radiusEase = 0;
+	a.burstFrames = Math.max(a.burstFrames, b.burstFrames);
+	a.mergeCooldownUntil = Math.max(a.mergeCooldownUntil, b.mergeCooldownUntil);
+	blackholes.splice(indexB, 1);
+}
+
+function resolveMergers(now) {
+	var changed = true;
+	while (changed) {
+		changed = false;
+		mergeSearch:
+		for (var i = 0; i < blackholes.length; i++) {
+			var a = blackholes[i];
+			if (a.mergeCooldownUntil > now) continue;
+			for (var j = i + 1; j < blackholes.length; j++) {
+				var b = blackholes[j];
+				if (b.mergeCooldownUntil > now) continue;
+				var dx = b.x - a.x, dy = b.y - a.y;
+				var distance = Math.sqrt(dx * dx + dy * dy);
+				var mature = a.currentRadius >= b.radius || b.currentRadius >= a.radius;
+				var touching = distance < (a.currentRadius + b.currentRadius) * MERGE_FACTOR;
+				if (mature && touching) {
+					mergeBlackHoles(i, j);
+					changed = true;
+					if (blackholes[i].currentRadius > EXPLOSION_RADIUS_LIMIT) explodeBlackHole(i, now);
+					break mergeSearch;
+				}
 			}
+		}
+	}
+}
 
-			blackholeUniforms[offset] = blackhole.x;
-			blackholeUniforms[offset + 1] = blackhole.y;
-			blackholeUniforms[offset + 2] = blackhole.mass * 0.00001;
-		} else {
-			blackholeUniforms[offset] = 0;
-			blackholeUniforms[offset + 1] = 0;
-			blackholeUniforms[offset + 2] = 0;
+function updatePhysics(now) {
+	for (var i = 0; i < blackholes.length; i++) {
+		var hole = blackholes[i];
+		hole.radiusEase = (hole.radiusEase + (hole.radius - hole.currentRadius) * 0.07) * 0.95;
+		hole.currentRadius += hole.radiusEase;
+		if (hole.currentRadius < 0) hole.currentRadius = 0;
+
+		var targetMass = LENS_MASS * hole.bodyCount;
+		if (hole.mass < targetMass * 0.999) hole.mass += (targetMass - hole.mass) * 0.03;
+
+		// Only explosion fragments have extra inertial motion; normal attraction matches the reference.
+		if (hole.burstFrames > 0) {
+			hole.x += hole.vx;
+			hole.y += hole.vy;
+			hole.vx *= 0.965;
+			hole.vy *= 0.965;
+			hole.burstFrames--;
+			if (hole.burstFrames === 0) hole.vx = hole.vy = 0;
 		}
 	}
 
-	gl.uniform3fv(locationOfBlackholes, blackholeUniforms);
-	gl.uniform1f(locationOfTime, currentTime); // update the time uniform in our shader
+	resolveMergers(now);
 
-	window.requestAnimationFrame(render, canvas); // request the next frame
+	// Match preview (5).html: each body attracts every other body with its gravity value.
+	// Accumulate all displacements first so the result does not depend on array order.
+	var moveX = new Float64Array(blackholes.length);
+	var moveY = new Float64Array(blackholes.length);
+	for (i = 0; i < blackholes.length; i++) {
+		for (var j = i + 1; j < blackholes.length; j++) {
+			var first = blackholes[i], second = blackholes[j];
+			var dx = second.x - first.x, dy = second.y - first.y;
+			var distance = Math.sqrt(dx * dx + dy * dy);
+			if (distance < 0.0001) continue;
+			var nx = dx / distance, ny = dy / distance;
+			moveX[i] += nx * second.gravity;
+			moveY[i] += ny * second.gravity;
+			moveX[j] -= nx * first.gravity;
+			moveY[j] -= ny * first.gravity;
+		}
+	}
+	for (i = 0; i < blackholes.length; i++) {
+		blackholes[i].x += moveX[i];
+		blackholes[i].y += moveY[i];
+	}
+}
 
-	positionLocation = gl.getAttribLocation(program, "a_position"); // do stuff for those vertex's
-	gl.enableVertexAttribArray(positionLocation);
-	gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+function drawQuad() {
+	var position = gl.getAttribLocation(program, 'a_position');
+	gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+	gl.enableVertexAttribArray(position);
+	gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
 	gl.drawArrays(gl.TRIANGLES, 0, 6);
 }
 
-window.addEventListener('load', function(event){
-	var image = new Image();
-  	image.crossOrigin = "Anonymous";
-	image.src = bgUrl;
-	image.onload = function() {
-		init(image);
+function drawPass(sourceTexture, targetFramebuffer, hole) {
+	gl.bindFramebuffer(gl.FRAMEBUFFER, targetFramebuffer);
+	gl.viewport(0, 0, canvas.width, canvas.height);
+	gl.activeTexture(gl.TEXTURE0);
+	gl.bindTexture(gl.TEXTURE_2D, sourceTexture);
+	gl.uniform1i(locationOfImage, 0);
+	if (hole) {
+		gl.uniform2f(locationOfCenter, hole.x / canvas.width, hole.y / canvas.height);
+		gl.uniform1f(locationOfMass, hole.mass * 0.00001);
+	} else {
+		gl.uniform2f(locationOfCenter, 0, 0);
+		gl.uniform1f(locationOfMass, 0);
 	}
+	drawQuad();
+}
 
+function renderBlackHoles() {
+	gl.useProgram(program);
+	if (blackholes.length === 0) {
+		drawPass(backgroundTexture, null, null);
+		return;
+	}
+	var sourceTexture = backgroundTexture;
+	var targetIndex = 0;
+	if (blackholes.length > 1) ensureRenderTargets();
+
+	for (var i = 0; i < blackholes.length; i++) {
+		var last = i === blackholes.length - 1;
+		var targetFramebuffer = null;
+		var nextSource = sourceTexture;
+		if (!last) {
+			var target = renderTargets[targetIndex];
+			targetFramebuffer = target.framebuffer;
+			nextSource = target.texture;
+			targetIndex = 1 - targetIndex;
+		}
+		drawPass(sourceTexture, targetFramebuffer, blackholes[i]);
+		sourceTexture = nextSource;
+	}
+	gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+function render() {
+	var now = Date.now();
+	updatePhysics(now);
+	renderBlackHoles();
+	drawExplosionEffects(now);
+	window.requestAnimationFrame(render);
+}
+
+function init(image) {
+	canvas = document.getElementById('glscreen');
+	gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+	if (!gl) throw new Error('WebGL is not available in this browser.');
+
+	fxCanvas = document.getElementById('fxscreen');
+	fxContext = fxCanvas.getContext('2d');
+	resizeCanvas();
+	canvas.addEventListener('click', addBlackHole);
+
+	program = createProgram();
+	gl.useProgram(program);
+	locationOfResolution = gl.getUniformLocation(program, 'u_resolution');
+	locationOfCenter = gl.getUniformLocation(program, 'u_center');
+	locationOfMass = gl.getUniformLocation(program, 'u_mass');
+	locationOfImage = gl.getUniformLocation(program, 'u_image');
+	gl.uniform2f(locationOfResolution, canvas.width, canvas.height);
+	gl.uniform1i(locationOfImage, 0);
+
+	quadBuffer = gl.createBuffer();
+	gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+	gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+		-1, -1, 1, -1, -1, 1,
+		-1, 1, 1, -1, 1, 1
+	]), gl.STATIC_DRAW);
+
+	createBackgroundTexture(image);
+	render();
+}
+
+window.addEventListener('load', function() {
+	var image = new Image();
+	image.crossOrigin = 'Anonymous';
+	image.onload = function() {
+		try { init(image); }
+		catch (error) { console.error('Gravity Balls initialization failed:', error); }
+	};
+	image.onerror = function() { console.error('Gravity Balls background image could not be loaded.'); };
+	image.src = bgUrl;
 });
 
-window.addEventListener('resize', function(event){
-	// just re-doing some stuff in the init here, to enable resizing.
-
-	canvas.width  = window.innerWidth >= window.innerHeight ? window.innerWidth : window.innerHeight;
-	canvas.height = window.innerWidth >= window.innerHeight ? window.innerWidth : window.innerHeight;
-	gl.viewport(0, 0, canvas.width, canvas.height);
-	locationOfResolution = gl.getUniformLocation(program, "u_resolution");
-	gl.uniform2f(locationOfResolution, canvas.width, canvas.height);
+window.addEventListener('resize', function() {
+	if (canvas && gl) resizeCanvas();
 });
