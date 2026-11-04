@@ -19,13 +19,13 @@ precision mediump float;
 #endif
 
 #define PI 3.14159265359
+#define MAX_BLACKHOLES 8
 
 uniform sampler2D u_image;
 varying vec2 v_texCoord;
 
 uniform vec2 u_resolution;
-uniform vec2 u_mouse;
-uniform float u_mass;
+uniform vec3 u_blackholes[MAX_BLACKHOLES];
 uniform float u_time;
 
 vec2 rotate(vec2 mt, vec2 st, float angle){
@@ -43,22 +43,31 @@ vec2 rotate(vec2 mt, vec2 st, float angle){
 
 void main() {
      vec2 st = vec2(gl_FragCoord.x, u_resolution.y - gl_FragCoord.y)/u_resolution;
-	vec2 mt = vec2(u_mouse.x, u_resolution.y - u_mouse.y)/u_resolution;
+	vec2 samplePoint = st;
+	float totalPull = 0.0;
 
-	float dx = st.x - mt.x;
-	float dy = st.y - mt.y;
+	// Apply the original lens equation once for each active black hole.
+	// With one black hole, this is the same calculation as the original shader.
+	for (int i = 0; i < MAX_BLACKHOLES; i++) {
+		vec3 blackhole = u_blackholes[i];
 
-	float dist = sqrt(dx * dx + dy * dy);
-	float pull = u_mass / (dist * dist);
-	
+		if (blackhole.z > 0.0) {
+			float dx = samplePoint.x - blackhole.x;
+			float dy = samplePoint.y - blackhole.y;
+			float dist = sqrt(dx * dx + dy * dy);
+			float pull = blackhole.z / (dist * dist);
+
+			totalPull += pull;
+			samplePoint = rotate(blackhole.xy, samplePoint, pull);
+		}
+	}
+
      vec3 color = vec3(0.0);
-	
-	vec2 r = rotate(mt,st,pull);
-	vec4 imgcolor = texture2D(u_image, r);
+	vec4 imgcolor = texture2D(u_image, samplePoint);
 	color = vec3(
-		(imgcolor.x - (pull * 0.25)),
-		(imgcolor.y - (pull * 0.25)), 
-		(imgcolor.z - (pull * 0.25))
+		(imgcolor.x - (totalPull * 0.25)),
+		(imgcolor.y - (totalPull * 0.25)),
+		(imgcolor.z - (totalPull * 0.25))
 	);
 	
 
