@@ -21,6 +21,7 @@ uniform sampler2D u_image;
 uniform vec2 u_resolution;
 uniform vec2 u_center;
 uniform float u_mass;
+uniform float u_flip_y;
 
 vec2 rotate(vec2 mt, vec2 st, float angle) {
 	float cosine = cos(angle * PI);
@@ -37,9 +38,13 @@ void main() {
 	float dy = st.y - mt.y;
 	float dist = sqrt(dx * dx + dy * dy);
 
-	// The original lens equation is preserved exactly.
+	// The original lens equation remains unchanged.
 	float pull = u_mass / (dist * dist);
 	vec2 samplePoint = rotate(mt, st, pull);
+
+	// Framebuffer textures use the opposite vertical origin from the source image.
+	samplePoint.y = mix(samplePoint.y, 1.0 - samplePoint.y, u_flip_y);
+
 	vec4 imgcolor = texture2D(u_image, samplePoint);
 	vec3 color = vec3(
 		imgcolor.x - (pull * 0.25),
