@@ -13,7 +13,7 @@ var explosions = [];
 var canvas, gl, fxCanvas, fxContext, program, quadBuffer, backgroundTexture;
 var renderTargets = [];
 var targetWidth = 0, targetHeight = 0;
-var locationOfResolution, locationOfCenter, locationOfMass, locationOfImage;
+var locationOfResolution, locationOfCenter, locationOfMass, locationOfImage, locationOfFlipY;
 var startTime = Date.now();
 
 function makeBlackHole(x, y, options) {
@@ -77,8 +77,8 @@ function createBackgroundTexture(image) {
 	gl.bindTexture(gl.TEXTURE_2D, backgroundTexture);
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
 }
 
@@ -349,12 +349,13 @@ function drawQuad() {
 	gl.drawArrays(gl.TRIANGLES, 0, 6);
 }
 
-function drawPass(sourceTexture, targetFramebuffer, hole) {
+function drawPass(sourceTexture, targetFramebuffer, hole, flipY) {
 	gl.bindFramebuffer(gl.FRAMEBUFFER, targetFramebuffer);
 	gl.viewport(0, 0, canvas.width, canvas.height);
 	gl.activeTexture(gl.TEXTURE0);
 	gl.bindTexture(gl.TEXTURE_2D, sourceTexture);
 	gl.uniform1i(locationOfImage, 0);
+	gl.uniform1f(locationOfFlipY, flipY ? 1 : 0);
 	if (hole) {
 		gl.uniform2f(locationOfCenter, hole.x / canvas.width, hole.y / canvas.height);
 		gl.uniform1f(locationOfMass, hole.mass * 0.00001);
@@ -369,7 +370,7 @@ function renderBlackHoles() {
 	gl.useProgram(program);
 	if (blackholes.length <= 1 && renderTargets.length) deleteRenderTargets();
 	if (blackholes.length === 0) {
-		drawPass(backgroundTexture, null, null);
+		drawPass(backgroundTexture, null, null, false);
 		return;
 	}
 	var sourceTexture = backgroundTexture;
@@ -386,7 +387,7 @@ function renderBlackHoles() {
 			nextSource = target.texture;
 			targetIndex = 1 - targetIndex;
 		}
-		drawPass(sourceTexture, targetFramebuffer, blackholes[i]);
+		drawPass(sourceTexture, targetFramebuffer, blackholes[i], i > 0);
 		sourceTexture = nextSource;
 	}
 	gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -416,6 +417,7 @@ function init(image) {
 	locationOfCenter = gl.getUniformLocation(program, 'u_center');
 	locationOfMass = gl.getUniformLocation(program, 'u_mass');
 	locationOfImage = gl.getUniformLocation(program, 'u_image');
+	locationOfFlipY = gl.getUniformLocation(program, 'u_flip_y');
 	gl.uniform2f(locationOfResolution, canvas.width, canvas.height);
 	gl.uniform1i(locationOfImage, 0);
 
