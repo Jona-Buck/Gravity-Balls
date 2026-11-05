@@ -24,6 +24,10 @@ function makeBlackHole(x, y, options) {
 		gravity: options.gravity !== undefined ? options.gravity : BASE_GRAVITY,
 		mass: options.mass !== undefined ? options.mass : 0,
 		bodyCount: options.bodyCount !== undefined ? options.bodyCount : 1,
+		isMergeGhost: false,
+		mergeOwner: null,
+		mergeTween: null,
+		mergeMassTween: null
 	};
 }
 
@@ -282,32 +286,56 @@ function explodeBlackHole(index, now) {
 		now,
 		collapsed.bodyCount
 	);
-	blackholes.splice(index, 1);
+
+	for (var i = blackholes.length - 1; i >= 0; i--) {
+		if (blackholes[i] === collapsed || blackholes[i].mergeOwner === collapsed) {
+			blackholes.splice(i, 1);
+		}
+	}
 }
 
-function mergeBlackHoles(indexA, indexB) {
+function mergeBlackHoles(indexA, indexB, now) {
 	var a = blackholes[indexA], b = blackholes[indexB];
+
+	// Keep the larger object as the visual survivor. Its centre never teleports.
 	if (b.radius > a.radius) {
-		var swap = a; a = b; b = swap;
+		var swap = a;
+		a = b;
+		b = swap;
 		blackholes[indexA] = a;
 		blackholes[indexB] = b;
 	}
 
-	var massA = Math.max(a.gravity, 0.000001);
-	var massB = Math.max(b.gravity, 0.000001);
-	var totalMass = massA + massB;
-	a.x = (a.x * massA + b.x * massB) / totalMass;
-	a.y = (a.y * massA + b.y * massB) / totalMass;
-
 	var areaA = a.radius * a.radius;
 	var areaB = b.radius * b.radius;
+
+	// Physical values combine immediately, but the visible lens mass is tweened.
 	a.gravity += b.gravity;
-	a.mass += b.mass;
 	a.bodyCount += b.bodyCount;
+
+	// Target radius is the area-conserving radius. currentRadius stays where it is
+	// and approaches this target through the existing spring easing in updatePhysics.
 	a.radius = Math.sqrt(areaA + areaB);
-	a.currentRadius = Math.sqrt(areaA + areaB * 3);
 	a.radiusEase = 0;
-	blackholes.splice(indexB, 1);
+
+	a.mergeMassTween = {
+		from: a.mass,
+		to: LENS_MASS * a.bodyCount,
+		start: now,
+		duration: 620
+	};
+
+	// Keep the absorbed lens in the render list briefly. It glides into the
+	// survivor and fades out, while the survivor smoothly gains its lens mass.
+	b.isMergeGhost = true;
+	b.mergeOwner = a;
+	b.mergeTween = {
+		fromX: b.x,
+		fromY: b.y,
+		start: now,
+		duration: 620,
+		startMass: b.mass
+	};
 }
 
 function resolveMergers(now) {
@@ -317,8 +345,10 @@ function resolveMergers(now) {
 		mergeSearch:
 		for (var i = 0; i < blackholes.length; i++) {
 			var a = blackholes[i];
+			if (a.isMergeGhost || a.mergeTween) continue;
 			for (var j = i + 1; j < blackholes.length; j++) {
 				var b = blackholes[j];
+				if (b.isMergeGhost || b.mergeTween) continue;
 				var dx = b.x - a.x, dy = b.y - a.y;
 				var distance = Math.sqrt(dx * dx + dy * dy);
 				var mergeReach = 0;
@@ -326,7 +356,7 @@ function resolveMergers(now) {
 				if (b.currentRadius >= a.radius) mergeReach = Math.max(mergeReach, b.currentRadius + a.radius);
 				var touching = mergeReach > 0 && distance < mergeReach * MERGE_FACTOR;
 				if (touching) {
-					mergeBlackHoles(i, j);
+					mergeBlackHoles(i, j, now);
 					changed = true;
 					if (blackholes[i].bodyCount >= EXPLOSION_BODY_COUNT) explodeBlackHole(i, now);
 					break mergeSearch;
@@ -337,39 +367,88 @@ function resolveMergers(now) {
 }
 
 function updatePhysics(now) {
-	for (var i = 0; i < blackholes.length; i++) {
+	var i, j;
+
+	// Smoothly animate absorbed lenses toward their survivor and fade their
+	// distortion away. Remove the ghost only when its visual transition ends.
+	for (i = blackholes.length - 1; i >= 0; i--) {
 		var hole = blackholes[i];
+
+		if (hole.isMergeGhost) {
+			var mergeProgress = Math.min(1, Math.max(0,
+				(now - hole.mergeTween.start) / hole.mergeTween.duration
+			));
+			var mergeEase = mergeProgress * mergeProgress * (3 - 2 * mergeProgress);
+			hole.x = hole.mergeTween.fromX +
+				(hole.mergeOwner.x - hole.mergeTween.fromX) * mergeEase;
+			hole.y = hole.mergeTween.fromY +
+				(hole.mergeOwner.y - hole.mergeTween.fromY) * mergeEase;
+			hole.mass = hole.mergeTween.startMass * (1 - mergeEase);
+
+			if (mergeProgress >= 1 || !hole.mergeOwner) {
+				blackholes.splice(i, 1);
+			}
+			continue;
+		}
+
 		hole.radiusEase = (hole.radiusEase + (hole.radius - hole.currentRadius) * 0.07) * 0.95;
 		hole.currentRadius += hole.radiusEase;
 		if (hole.currentRadius < 0) hole.currentRadius = 0;
 
-		var targetMass = LENS_MASS * hole.bodyCount;
-		if (hole.mass < targetMass * 0.999) hole.mass += (targetMass - hole.mass) * 0.03;
+		if (hole.mergeMassTween) {
+			var massProgress = Math.min(1, Math.max(0,
+				(now - hole.mergeMassTween.start) / hole.mergeMassTween.duration
+			));
+			var massEase = massProgress * massProgress * (3 - 2 * massProgress);
+			hole.mass = hole.mergeMassTween.from +
+				(hole.mergeMassTween.to - hole.mergeMassTween.from) * massEase;
 
+			if (massProgress >= 1) {
+				hole.mass = hole.mergeMassTween.to;
+				hole.mergeMassTween = null;
+			}
+		} else {
+			var targetMass = LENS_MASS * hole.bodyCount;
+			if (hole.mass < targetMass * 0.999) {
+				hole.mass += (targetMass - hole.mass) * 0.03;
+			}
+		}
 	}
 
 	resolveMergers(now);
 
-	// Match preview (5).html: each body attracts every other body with its gravity value.
-	// Accumulate all displacements first so the result does not depend on array order.
-	var moveX = new Float64Array(blackholes.length);
-	var moveY = new Float64Array(blackholes.length);
+	// Match preview (5).html: each active body attracts every other active body
+	// with its gravity value. Merge ghosts are render-only during their fade-out.
+	var activeHoles = [];
 	for (i = 0; i < blackholes.length; i++) {
-		for (var j = i + 1; j < blackholes.length; j++) {
-			var first = blackholes[i], second = blackholes[j];
-			var dx = second.x - first.x, dy = second.y - first.y;
+		if (!blackholes[i].isMergeGhost) activeHoles.push(blackholes[i]);
+	}
+
+	var movementX = new Float64Array(activeHoles.length);
+	var movementY = new Float64Array(activeHoles.length);
+
+	for (i = 0; i < activeHoles.length; i++) {
+		for (j = i + 1; j < activeHoles.length; j++) {
+			var first = activeHoles[i], second = activeHoles[j];
+			var dx = second.x - first.x;
+			var dy = second.y - first.y;
 			var distance = Math.sqrt(dx * dx + dy * dy);
+
 			if (distance < 0.0001) continue;
-			var nx = dx / distance, ny = dy / distance;
-			moveX[i] += nx * second.gravity;
-			moveY[i] += ny * second.gravity;
-			moveX[j] -= nx * first.gravity;
-			moveY[j] -= ny * first.gravity;
+
+			var nx = dx / distance;
+			var ny = dy / distance;
+
+			movementX[i] += nx * second.gravity;
+			movementY[i] += ny * second.gravity;
+			movementX[j] -= nx * first.gravity;
+			movementY[j] -= ny * first.gravity;
 		}
 	}
-	for (i = 0; i < blackholes.length; i++) {
-		blackholes[i].x += moveX[i];
-		blackholes[i].y += moveY[i];
+
+	for (i = 0; i < activeHoles.length; i++) {
+		activeHoles[i].x += movementX[i];
+		activeHoles[i].y += movementY[i];
 	}
 }
 
