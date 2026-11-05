@@ -50,19 +50,38 @@ function getCanvasPoint(event) {
 }
 
 function findBlackHoleAt(point) {
-	for (var i = blackholes.length - 1; i >= 0; i--) {
+	var rect = canvas.getBoundingClientRect();
+	// The visible lens is larger than its logical radius. Give it a generous
+	// screen-space hit area so it can be grabbed reliably with mouse or finger.
+	var minHitRadius = rect.width ? 34 * canvas.width / rect.width : 34;
+	var closestHole = null;
+	var closestDistanceSq = Infinity;
+
+	for (var i = 0; i < blackholes.length; i++) {
 		var hole = blackholes[i];
 		if (hole.isMergeGhost || hole.mergeTween || hole.mergeMassTween) continue;
+
 		var dx = point.x - hole.x;
 		var dy = point.y - hole.y;
-		var hitRadius = Math.max(hole.radius, hole.currentRadius);
-		if (dx * dx + dy * dy <= hitRadius * hitRadius) return hole;
+		var distanceSq = dx * dx + dy * dy;
+		var hitRadius = Math.max(hole.radius, hole.currentRadius, minHitRadius);
+
+		if (distanceSq <= hitRadius * hitRadius && distanceSq < closestDistanceSq) {
+			closestHole = hole;
+			closestDistanceSq = distanceSq;
+		}
 	}
-	return null;
+	return closestHole;
 }
 
 function handlePointerDown(event) {
 	if (event.button !== undefined && event.button !== 0) return;
+
+	// Ignore presses outside the visible canvas even though listeners live on window.
+	var rect = canvas.getBoundingClientRect();
+	if (event.clientX < rect.left || event.clientX > rect.right ||
+		event.clientY < rect.top || event.clientY > rect.bottom) return;
+
 	var point = getCanvasPoint(event);
 	if (!point) return;
 
@@ -726,12 +745,49 @@ function init(image) {
 	resizeCanvas();
 	initializeParticles(PARTICLE_COUNT);
 	canvas.style.touchAction = 'none';
+	canvas.style.pointerEvents = 'auto';
 	canvas.style.cursor = 'crosshair';
-	canvas.addEventListener('pointerdown', handlePointerDown);
-	canvas.addEventListener('pointermove', handlePointerMove);
-	canvas.addEventListener('pointerup', handlePointerUp);
-	canvas.addEventListener('pointercancel', handlePointerCancel);
-	canvas.addEventListener('lostpointercapture', handlePointerCancel);
+
+	// Listen in the capture phase on window. This keeps dragging responsive
+	// even if another visual layer is placed above the WebGL canvas.
+	if (window.PointerEvent) {
+		window.addEventListener('pointerdown', handlePointerDown, true);
+		window.addEventListener('pointermove', handlePointerMove, true);
+		window.addEventListener('pointerup', handlePointerUp, true);
+		window.addEventListener('pointercancel', handlePointerCancel, true);
+		canvas.addEventListener('lostpointercapture', handlePointerCancel);
+	} else {
+		// Fallback for browsers without Pointer Events.
+		window.addEventListener('mousedown', handlePointerDown, true);
+		window.addEventListener('mousemove', handlePointerMove, true);
+		window.addEventListener('mouseup', handlePointerUp, true);
+		window.addEventListener('touchstart', function(event) {
+			if (event.changedTouches.length) {
+				var touch = event.changedTouches[0];
+				handlePointerDown({
+					clientX: touch.clientX, clientY: touch.clientY,
+					button: 0, pointerId: 'touch-fallback',
+					cancelable: event.cancelable, preventDefault: function() { event.preventDefault(); }
+				});
+			}
+		}, { capture: true, passive: false });
+		window.addEventListener('touchmove', function(event) {
+			if (event.changedTouches.length) {
+				var touch = event.changedTouches[0];
+				handlePointerMove({
+					clientX: touch.clientX, clientY: touch.clientY,
+					pointerId: 'touch-fallback',
+					cancelable: event.cancelable, preventDefault: function() { event.preventDefault(); }
+				});
+			}
+		}, { capture: true, passive: false });
+		window.addEventListener('touchend', function() {
+			handlePointerUp({ pointerId: 'touch-fallback' });
+		}, true);
+		window.addEventListener('touchcancel', function() {
+			handlePointerCancel({ pointerId: 'touch-fallback' });
+		}, true);
+	}
 
 	program = createProgram();
 	gl.useProgram(program);
