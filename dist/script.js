@@ -345,10 +345,10 @@ function resolveMergers(now) {
 		mergeSearch:
 		for (var i = 0; i < blackholes.length; i++) {
 			var a = blackholes[i];
-			if (a.isMergeGhost || a.mergeTween) continue;
+			if (a.isMergeGhost || a.mergeTween || a.mergeMassTween) continue;
 			for (var j = i + 1; j < blackholes.length; j++) {
 				var b = blackholes[j];
-				if (b.isMergeGhost || b.mergeTween) continue;
+				if (b.isMergeGhost || b.mergeTween || b.mergeMassTween) continue;
 				var dx = b.x - a.x, dy = b.y - a.y;
 				var distance = Math.sqrt(dx * dx + dy * dy);
 				var mergeReach = 0;
