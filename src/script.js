@@ -32,18 +32,94 @@ function makeBlackHole(x, y, options) {
 		isMergeGhost: false,
 		mergeOwner: null,
 		mergeTween: null,
-		mergeMassTween: null
+		mergeMassTween: null,
+		dragging: false,
+		dragOffsetX: 0,
+		dragOffsetY: 0,
+		pointerId: null
 	};
 }
 
-function addBlackHole(event) {
+function getCanvasPoint(event) {
 	var rect = canvas.getBoundingClientRect();
-	if (!rect.width || !rect.height) return;
-	var x = (event.clientX - rect.left) / rect.width * canvas.width;
-	var y = (event.clientY - rect.top) / rect.height * canvas.height;
-	if (x >= 0 && x <= canvas.width && y >= 0 && y <= canvas.height) {
-		blackholes.push(makeBlackHole(x, y));
+	if (!rect.width || !rect.height) return null;
+	return {
+		x: (event.clientX - rect.left) / rect.width * canvas.width,
+		y: (event.clientY - rect.top) / rect.height * canvas.height
+	};
+}
+
+function findBlackHoleAt(point) {
+	for (var i = blackholes.length - 1; i >= 0; i--) {
+		var hole = blackholes[i];
+		if (hole.isMergeGhost || hole.mergeTween || hole.mergeMassTween) continue;
+		var dx = point.x - hole.x;
+		var dy = point.y - hole.y;
+		var hitRadius = Math.max(hole.radius, hole.currentRadius);
+		if (dx * dx + dy * dy <= hitRadius * hitRadius) return hole;
 	}
+	return null;
+}
+
+function handlePointerDown(event) {
+	if (event.button !== undefined && event.button !== 0) return;
+	var point = getCanvasPoint(event);
+	if (!point) return;
+
+	var hit = findBlackHoleAt(point);
+	if (hit) {
+		hit.dragging = true;
+		hit.pointerId = event.pointerId;
+		hit.dragOffsetX = point.x - hit.x;
+		hit.dragOffsetY = point.y - hit.y;
+		canvas.style.cursor = 'grabbing';
+	} else {
+		blackholes.push(makeBlackHole(point.x, point.y));
+	}
+
+	if (canvas.setPointerCapture && event.pointerId !== undefined) {
+		try { canvas.setPointerCapture(event.pointerId); } catch (error) {}
+	}
+	if (event.cancelable) event.preventDefault();
+}
+
+function handlePointerMove(event) {
+	var point = getCanvasPoint(event);
+	if (!point) return;
+
+	var draggingHole = null;
+	for (var i = 0; i < blackholes.length; i++) {
+		var hole = blackholes[i];
+		if (hole.dragging && (hole.pointerId === null || hole.pointerId === event.pointerId)) {
+			draggingHole = hole;
+			break;
+		}
+	}
+
+	if (draggingHole) {
+		draggingHole.x = point.x - draggingHole.dragOffsetX;
+		draggingHole.y = point.y - draggingHole.dragOffsetY;
+		canvas.style.cursor = 'grabbing';
+		if (event.cancelable) event.preventDefault();
+		return;
+	}
+
+	canvas.style.cursor = findBlackHoleAt(point) ? 'grab' : 'crosshair';
+}
+
+function handlePointerUp(event) {
+	for (var i = 0; i < blackholes.length; i++) {
+		var hole = blackholes[i];
+		if (hole.dragging && (hole.pointerId === null || hole.pointerId === event.pointerId)) {
+			hole.dragging = false;
+			hole.pointerId = null;
+		}
+	}
+	canvas.style.cursor = 'crosshair';
+}
+
+function handlePointerCancel(event) {
+	handlePointerUp(event);
 }
 
 function compileShader(type, source) {
@@ -570,8 +646,10 @@ function updatePhysics(now) {
 	}
 
 	for (i = 0; i < activeHoles.length; i++) {
-		activeHoles[i].x += movementX[i];
-		activeHoles[i].y += movementY[i];
+		if (!activeHoles[i].dragging) {
+			activeHoles[i].x += movementX[i];
+			activeHoles[i].y += movementY[i];
+		}
 	}
 }
 
@@ -647,7 +725,13 @@ function init(image) {
 	particleBufferContext = particleBufferCanvas.getContext('2d');
 	resizeCanvas();
 	initializeParticles(PARTICLE_COUNT);
-	canvas.addEventListener('click', addBlackHole);
+	canvas.style.touchAction = 'none';
+	canvas.style.cursor = 'crosshair';
+	canvas.addEventListener('pointerdown', handlePointerDown);
+	canvas.addEventListener('pointermove', handlePointerMove);
+	canvas.addEventListener('pointerup', handlePointerUp);
+	canvas.addEventListener('pointercancel', handlePointerCancel);
+	canvas.addEventListener('lostpointercapture', handlePointerCancel);
 
 	program = createProgram();
 	gl.useProgram(program);
