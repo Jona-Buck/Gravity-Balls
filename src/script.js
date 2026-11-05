@@ -8,7 +8,12 @@ var EXPLOSION_BODY_COUNT = 32;
 
 var blackholes = [];
 var explosions = [];
-var canvas, gl, fxCanvas, fxContext, program, quadBuffer, backgroundTexture;
+var particles = [];
+var PARTICLE_COUNT = 2000;
+var PARTICLE_RADIUS = 1;
+var PARTICLE_SPEED_LIMIT = 12;
+var canvas, gl, fxCanvas, fxContext, particleBufferCanvas, particleBufferContext, program, quadBuffer, backgroundTexture;
+var particleScreenWidth = 0, particleScreenHeight = 0;
 var renderTargets = [];
 var targetWidth = 0, targetHeight = 0;
 var locationOfResolution, locationOfCenter, locationOfMass, locationOfImage, locationOfFlipY;
@@ -122,15 +127,28 @@ function ensureRenderTargets() {
 
 function resizeCanvas() {
 	if (!canvas || !gl) return;
+
 	var oldWidth = canvas.width || 1;
 	var oldHeight = canvas.height || 1;
+	var oldScreenWidth = particleScreenWidth || window.innerWidth || 1;
+	var oldScreenHeight = particleScreenHeight || window.innerHeight || 1;
 	var side = Math.max(window.innerWidth, window.innerHeight);
 	var scaleX = side / oldWidth;
 	var scaleY = side / oldHeight;
+	var screenScaleX = window.innerWidth / oldScreenWidth;
+	var screenScaleY = window.innerHeight / oldScreenHeight;
 
 	for (var i = 0; i < blackholes.length; i++) {
 		blackholes[i].x *= scaleX;
 		blackholes[i].y *= scaleY;
+	}
+
+	// Keep particle positions aligned with the visible screen after resizing.
+	for (i = 0; i < particles.length; i++) {
+		particles[i].x *= screenScaleX;
+		particles[i].y *= screenScaleY;
+		particles[i].latestX *= screenScaleX;
+		particles[i].latestY *= screenScaleY;
 	}
 
 	canvas.width = side;
@@ -140,10 +158,17 @@ function resizeCanvas() {
 		gl.uniform2f(locationOfResolution, canvas.width, canvas.height);
 	}
 	deleteRenderTargets();
+
 	if (fxCanvas) {
 		fxCanvas.width = window.innerWidth;
 		fxCanvas.height = window.innerHeight;
 	}
+	if (particleBufferCanvas) {
+		particleBufferCanvas.width = window.innerWidth;
+		particleBufferCanvas.height = window.innerHeight;
+	}
+	particleScreenWidth = window.innerWidth;
+	particleScreenHeight = window.innerHeight;
 }
 
 function spawnExplosionEffect(x, y, radius, now, bodyCount) {
@@ -182,8 +207,6 @@ function spawnExplosionEffect(x, y, radius, now, bodyCount) {
 
 function drawExplosionEffects(now) {
 	if (!fxContext) return;
-
-	fxContext.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
 
 	for (var i = explosions.length - 1; i >= 0; i--) {
 		var effect = explosions[i];
@@ -273,6 +296,106 @@ function drawExplosionEffects(now) {
 			fxContext.restore();
 		}
 	}
+}
+
+function createParticle() {
+	return {
+		x: Math.random() * particleScreenWidth,
+		y: Math.random() * particleScreenHeight,
+		latestX: 0,
+		latestY: 0,
+		vx: Math.random() * 2 - 1,
+		vy: Math.random() * 2 - 1,
+		radius: PARTICLE_RADIUS
+	};
+}
+
+function initializeParticles(count) {
+	particles = [];
+	for (var i = 0; i < count; i++) {
+		var particle = createParticle();
+		particle.latestX = particle.x;
+		particle.latestY = particle.y;
+		particles.push(particle);
+	}
+}
+
+function updateAndDrawParticles() {
+	if (!particleBufferContext || !fxContext) return;
+
+	var rect = canvas.getBoundingClientRect();
+	var gravitySources = [];
+
+	// Convert WebGL canvas coordinates into visible screen coordinates once per frame.
+	for (var i = 0; i < blackholes.length; i++) {
+		var hole = blackholes[i];
+		if (hole.isMergeGhost) continue;
+		gravitySources.push({
+			x: rect.left + (hole.x / canvas.width) * rect.width,
+			y: rect.top + (hole.y / canvas.height) * rect.height,
+			gravity: hole.gravity
+		});
+	}
+
+	// Match the preview's persistent particle trails: erase 35% of the previous frame.
+	particleBufferContext.save();
+	particleBufferContext.globalCompositeOperation = 'destination-out';
+	particleBufferContext.globalAlpha = 0.35;
+	particleBufferContext.fillRect(0, 0, particleScreenWidth, particleScreenHeight);
+	particleBufferContext.restore();
+
+	particleBufferContext.save();
+	particleBufferContext.fillStyle = particleBufferContext.strokeStyle = '#fff';
+	particleBufferContext.lineCap = particleBufferContext.lineJoin = 'round';
+	particleBufferContext.lineWidth = PARTICLE_RADIUS * 2;
+
+	// Every live black hole attracts every particle using the preview's normalized
+	// constant-force rule. The velocity cap is also kept from the source file.
+	particleBufferContext.beginPath();
+	for (i = 0; i < particles.length; i++) {
+		var p = particles[i];
+
+		for (var j = 0; j < gravitySources.length; j++) {
+			var source = gravitySources[j];
+			var dx = source.x - p.x;
+			var dy = source.y - p.y;
+			var distance = Math.sqrt(dx * dx + dy * dy);
+			if (distance > 0.0001) {
+				p.vx += (dx / distance) * source.gravity;
+				p.vy += (dy / distance) * source.gravity;
+			}
+		}
+
+		var speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+		if (speed > PARTICLE_SPEED_LIMIT) {
+			var speedScale = PARTICLE_SPEED_LIMIT / speed;
+			p.vx *= speedScale;
+			p.vy *= speedScale;
+		}
+
+		p.latestX = p.x;
+		p.latestY = p.y;
+		p.x += p.vx;
+		p.y += p.vy;
+
+		particleBufferContext.moveTo(p.x, p.y);
+		particleBufferContext.lineTo(p.latestX, p.latestY);
+	}
+	particleBufferContext.stroke();
+
+	particleBufferContext.beginPath();
+	for (i = 0; i < particles.length; i++) {
+		p = particles[i];
+		particleBufferContext.moveTo(p.x, p.y);
+		particleBufferContext.arc(p.x, p.y, p.radius, 0, Math.PI * 2, false);
+	}
+	particleBufferContext.fill();
+	particleBufferContext.restore();
+
+	// The particle-trail buffer and the explosion overlay share the transparent
+	// foreground canvas, but are rendered in separate passes.
+	fxContext.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
+	fxContext.drawImage(particleBufferCanvas, 0, 0);
 }
 
 function explodeBlackHole(index, now) {
@@ -508,6 +631,7 @@ function render() {
 	var now = Date.now();
 	updatePhysics(now);
 	renderBlackHoles();
+	updateAndDrawParticles();
 	drawExplosionEffects(now);
 	window.requestAnimationFrame(render);
 }
@@ -519,7 +643,10 @@ function init(image) {
 
 	fxCanvas = document.getElementById('fxscreen');
 	fxContext = fxCanvas.getContext('2d');
+	particleBufferCanvas = document.createElement('canvas');
+	particleBufferContext = particleBufferCanvas.getContext('2d');
 	resizeCanvas();
+	initializeParticles(PARTICLE_COUNT);
 	canvas.addEventListener('click', addBlackHole);
 
 	program = createProgram();
